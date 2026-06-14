@@ -1,0 +1,341 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  RUSTDOCFLAGS: "-D warnings"
+
+jobs:
+  test:
+    name: Rust ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, beta]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy lints
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --release --all-features
+
+      - name: Run unit tests
+        run: cargo test --lib --all-features
+
+      - name: Run doctests
+        run: cargo test --doc --all-features
+
+      - name: Build documentation (warnings as errors)
+        run: cargo doc --no-deps --all-features -- -D warnings
+
+      - name: Run integration tests (online, may be ignored)
+        run: cargo test --test corpus -- --include-ignored --nocapture
+        continue-on-error: true
+
+      - name: Verify binary size
+        run: |
+          BINARY_SIZE=$(stat -c%s target/release/youtube-legend-cli 2>/dev/null || stat -f%z target/release/youtube-legend-cli)
+          MAX_SIZE=$((20 * 1024 * 1024))
+          if [ "$BINARY_SIZE" -gt "$MAX_SIZE" ]; then
+            echo "::error::Binary size $BINARY_SIZE exceeds NFR-003 limit of 20MB"
+            exit 1
+          fi
+          echo "Binary size: $BINARY_SIZE bytes ($(($BINARY_SIZE / 1024 / 1024))MB)"
+
+      - name: Verify --help and --version
+        run: |
+          ./target/release/youtube-legend-cli --version
+          ./target/release/youtube-legend-cli --help
+
+      - name: Build examples
+        run: cargo build --examples --all-features
+
+      - name: Run RSS gate (NFR-002, no network, fixture-only)
+        run: cargo test --test rss --all-features
+
+      - name: Run offline cache tests (NFR-005)
+        run: cargo test --test offline_cache --all-features
+
+      - name: Run wiremock provider tests
+        run: cargo test --test provider_a_wiremock --test provider_b_wiremock --all-features
+
+      - name: Smoke test examples
+        run: |
+          cargo run --example single_url -- --help
+          cargo run --example batch -- --help
+
+  cross-compile:
+    name: Cross ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.continue-on-error || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            description: Linux x86_64
+          - target: x86_64-unknown-linux-musl
+            description: Linux x86_64 musl static
+          - target: aarch64-unknown-linux-musl
+            description: Linux ARM64 musl static
+          - target: x86_64-pc-windows-msvc
+            description: Windows x86_64
+          - target: x86_64-apple-darwin
+            description: macOS x86_64 (cross-compile, requires osxcross)
+            continue-on-error: true
+          - target: aarch64-apple-darwin
+            description: macOS ARM64 (cross-compile, requires osxcross)
+            continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: Build ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} --locked
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-legend-cli-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/youtube-legend-cli*
+
+  publish-dry-run:
+    name: cargo publish --dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: cargo package --list
+        run: cargo package --list --allow-dirty --locked
+      - name: cargo publish --dry-run
+        run: cargo publish --dry-run --locked --allow-dirty
+
+  msrv:
+    name: MSRV 1.96.0
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust 1.96.0
+        uses: dtolnay/rust-toolchain@1.96.0
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: cargo build --locked
+        run: cargo build --locked
+      - name: cargo test --lib --locked
+        run: cargo test --lib --locked
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: cargo-deny check
+        run: cargo deny check
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: cargo audit
+        run: cargo audit
+
+  public-api:
+    name: cargo public-api
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: Install cargo-public-api
+        run: cargo install cargo-public-api --locked
+      - name: Generate API baseline
+      - name: Module visibility sigilo gate (GAP-007)
+        run: |
+          COUNT=$(rg -c '^pub mod secret_endpoints' src/lib.rs || true)
+          if [ "$COUNT" != "0" ]; then
+            echo "::error::sigilo leak: 'pub mod secret_endpoints' exposed in src/lib.rs (GAP-007 regression)"
+            echo "Module must be 'pub(crate) mod secret_endpoints' - public exposure leaks sigilo hostnames in rustdoc."
+            exit 1
+          fi
+          echo "sigilo gate OK: secret_endpoints module is not publicly re-exported"
+        run: cargo public-api --all-features --output-path api-public-api.txt
+      - name: Sigilo gate
+        run: |
+          if grep -qE 'PROVIDER_(A|B)_(PRIMARY|API|REDIRECT|INFO|SUBTITLE|TUTOKEN|HTOKEN)|OBFUSCATED_(PWD|PASSWORD)|COOKIE_ANTI_BOT_NAME|USER_AGENT_IDENTITY' api-public-api.txt; then
+            echo "::error::Sigilo leak detected in public API baseline:"
+            grep -nE 'PROVIDER_(A|B)_(PRIMARY|API|REDIRECT|INFO|SUBTITLE|TUTOKEN|HTOKEN)|OBFUSCATED_(PWD|PASSWORD)|COOKIE_ANTI_BOT_NAME|USER_AGENT_IDENTITY' api-public-api.txt
+            exit 1
+          fi
+      - name: Diff public API against main
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          cargo public-api --all-features --output-path /tmp/api-pr.txt
+          cargo public-api --all-features --target-ref origin/main --output-path /tmp/api-main.txt
+          diff -u /tmp/api-main.txt /tmp/api-pr.txt
+      - name: Upload API snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-public-api
+          path: api-public-api.txt
+
+  semver-checks:
+    name: cargo semver-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --locked
+      - name: Run semver-checks
+        run: cargo semver-checks --all-features
+
+  cargo-install:
+    name: cargo install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: cargo install --path
+        run: cargo install --path . --locked --bin youtube-legend-cli --root /tmp/cli-test
+      - name: Verify installed binary --version
+        run: /tmp/cli-test/bin/youtube-legend-cli --version
+      - name: Verify installed binary --help
+        run: /tmp/cli-test/bin/youtube-legend-cli --help
+
+  matrix-os:
+    name: Cross OS ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: Clippy on ${{ matrix.os }}
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Build on ${{ matrix.os }}
+        run: cargo build --release --all-features
+
+  nightly:
+    name: Rust nightly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: Clippy nightly
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Doc build nightly
+        run: cargo doc --no-deps --all-features
+
+  docs-link-check:
+    name: docs link check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+      - name: Build documentation to HTML
+        run: cargo doc --no-deps --all-features
+      - name: Install lychee
+        run: cargo install lychee --locked
+      - name: lychee link check
+        run: lychee --offline target/doc/

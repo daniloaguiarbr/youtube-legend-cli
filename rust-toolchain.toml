@@ -1,0 +1,8 @@
+# Pinned toolchain for local development and reproducible builds.
+# CI also exercises stable and beta. The MSRV recorded in Cargo.toml
+# and README is the lowest rustc that satisfies every transitive
+# dependency currently in use; the matrix in CI confirms it.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

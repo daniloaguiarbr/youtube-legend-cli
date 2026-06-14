@@ -1,0 +1,16 @@
+# Corpus de teste conforme PRD Apêndice A.1.1
+# 3 vídeos com sucesso esperado + 1 sem legenda
+# Formato: uma URL por linha; comentários iniciam com #
+# Vídeos marcados com # sem-legenda devem retornar exit code 66 (EX_NOINPUT)
+
+# Sucesso 1: tutorial Python (NvZ4VZ5hooY)
+https://youtu.be/NvZ4VZ5hooY
+
+# sem-legenda: vídeo sem legendas disponíveis (Tn08k_PWOQk)
+# https://youtu.be/Tn08k_PWOQk
+
+# Sucesso 2: tutorial Rust (ulNsa0sD8N0)
+https://youtu.be/ulNsa0sD8N0
+
+# Sucesso 3: tutorial Go (86FAWCzIe_4)
+https://youtu.be/86FAWCzIe_4

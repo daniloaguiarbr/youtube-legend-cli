@@ -1,0 +1,47 @@
+# youtube-legend-cli
+
+> Non-interactive Rust CLI for downloading YouTube subtitles through third-party providers via a native Unix stdin/stdout interface.
+
+## Docs
+- [README](https://github.com/danilo/youtube-legend-cli/blob/main/README.md): quickstart, flags, exit codes, install
+- [CHANGELOG](https://github.com/danilo/youtube-legend-cli/blob/main/CHANGELOG.md): release history following Keep a Changelog 1.1.0
+- [API reference](https://docs.rs/youtube-legend-cli): full rustdoc for every public item
+- [CONTRIBUTING](https://github.com/danilo/youtube-legend-cli/blob/main/CONTRIBUTING.md): dev workflow, MSRV, style
+- [SECURITY](https://github.com/danilo/youtube-legend-cli/blob/main/SECURITY.md): supported versions, threat model, reporting
+- [CODE_OF_CONDUCT](https://github.com/danilo/youtube-legend-cli/blob/main/CODE_OF_CONDUCT.md): Contributor Covenant 2.1
+- [docs/agent-teams-workflow.md](https://github.com/danilo/youtube-legend-cli/blob/main/docs/agent-teams-workflow.md): the Agent Teams playbook used to deliver v0.2.6
+- [docs/decisions/0009-cargo-toml-ownership-in-parallel-tasks.md](https://github.com/danilo/youtube-legend-cli/blob/main/docs/decisions/0009-cargo-toml-ownership-in-parallel-tasks.md): ADR-0009 (Cargo.toml serialisation under Agent Teams)
+
+## Modules
+- [cli](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/cli/index.html): clap-derived argument parser and the Cli struct (17 flags incl. the 7 globals)
+- [commands](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/commands/index.html): top-level dispatch between single-URL extract and batch mode
+- [provider](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/provider/index.html): Provider trait, ProviderA, ProviderB, ProviderChain, robots checker, optional ProviderHeadless
+- [parse](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/parse/index.html): SRT text extraction and YouTube URL/video-id parsing
+- [cache](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/cache/index.html): TTL-keyed local files at ~/.cache/youtube-legend-cli
+- [retry](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/retry/index.html): exponential backoff and in-memory circuit breaker
+- [io](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/io/index.html): stdin/stdout/TTY helpers
+- [error](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/error/index.html): AppError enum and BSD sysexits.h exit-code table
+- [logging](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/logging/index.html): tracing subscriber initialiser with EnvFilter precedence
+- [crypto](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/crypto/index.html): AES-256-CBC plus PBKDF2 for provider-B signing
+- text is `pub(crate)` and not re-exported; reach via the crate root only
+
+## Companion binaries
+- `youtube-legend-cli` — the subtitle fetcher
+- `snapshot` — probes both providers and writes redacted HTML snapshots for drift detection (consumes gitignored `src/secret_endpoints.rs`)
+
+## Install
+- `cargo install youtube-legend-cli` from crates.io
+- `cargo install --path .` from a local checkout
+- Download a release binary for x86_64-unknown-linux-gnu, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl, x86_64-pc-windows-msvc, x86_64-apple-darwin, or aarch64-apple-darwin
+
+## Stream contracts
+- stdout is reserved for the subtitle body (or the --json envelope)
+- stderr is reserved for logs, progress, and human error messages
+- stdin accepts a single URL, a batch of one URL per line, or --batch flag input
+
+## Optional
+- Source: https://github.com/danilo/youtube-legend-cli
+- License: dual MIT OR Apache-2.0
+- MSRV: 1.96.0
+- Categories: command-line-utilities, web-programming::scraping
+- 12 CI jobs including deny, audit, public-api sigilo gate, semver-checks, cargo-install, matrix-os

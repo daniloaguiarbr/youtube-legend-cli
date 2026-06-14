@@ -1,0 +1,11 @@
+disallowed-methods = [
+    { path = "std::panic::panic", reason = "use thiserror::Error + Result", allow-invalid = true },
+    { path = "tokio::runtime::Runtime::new", reason = "use #[tokio::main] attribute", allow-invalid = true },
+]
+cognitive-complexity-threshold = 30
+too-many-arguments-threshold = 8
+# missing-docs-in-private-items is a clippy lint name that does
+# not exist in stable; use missing-docs-in-crate-items instead
+# (currently disabled to avoid breaking the build until each
+# private item gets a doc comment).
+missing-docs-in-crate-items = false

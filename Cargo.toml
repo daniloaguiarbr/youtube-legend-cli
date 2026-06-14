@@ -1,0 +1,154 @@
+[package]
+name = "youtube-legend-cli"
+version = "0.2.6"
+edition = "2021"
+default-run = "youtube-legend-cli"
+rust-version = "1.96.0"
+authors = ["Danilo <danilo@example.com>"]
+license = "MIT OR Apache-2.0"
+description = "Non-interactive Rust CLI that downloads YouTube subtitles through third-party providers, using a native Unix stdin/stdout interface."
+readme = "README.md"
+keywords = ["youtube", "subtitles", "cli", "scraping", "srt"]
+categories = ["command-line-utilities", "web-programming::scraping"]
+repository = "https://github.com/danilo/youtube-legend-cli"
+homepage = "https://github.com/danilo/youtube-legend-cli"
+documentation = "https://docs.rs/youtube-legend-cli"
+exclude = [
+    "docs_prd/**",
+    "docs_rules/**",
+    ".github/**",
+    "tests/fixtures/snapshots/**",
+    "*.bak.*",
+    "*.tar.gz",
+    "/graphrag.sqlite",
+    "/graphrag.sqlite-shm",
+    "/graphrag.sqlite-wal",
+    "/gaps.md",
+    "/AGENTS.md",
+    "/CLAUDE.md",
+    "/llms.txt",
+    "/llms-full.txt",
+    "/ci.yml",
+]
+
+[badges.maintenance]
+status = "actively-developed"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs", "--html-in-header", "docsrs-header.html"]
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "x86_64-pc-windows-msvc", "x86_64-apple-darwin", "aarch64-apple-darwin"]
+no-default-features = false
+msrv-policy = "highest"
+
+[dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "gzip", "cookies", "json", "form"] }
+scraper = { version = "0.27", default-features = false }
+aes = { version = "0.8", features = ["zeroize"] }
+cbc = { version = "0.1", features = ["zeroize"] }
+pbkdf2 = { version = "0.12", features = ["simple"] }
+sha1 = { version = "0.10" }
+base64 = { version = "0.22" }
+hex = { version = "0.4" }
+rand = { version = "0.10", features = ["sys_rng"] }
+url = { version = "2.5" }
+clap = { version = "4.5", features = ["derive", "wrap_help", "cargo", "unicode"] }
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+mimalloc = { version = "0.1", default-features = false, features = ["override"] }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = { version = "2.0" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+toml = "0.8"
+regex = { version = "1.10" }
+futures = { version = "0.3", optional = true }
+chromiumoxide = { version = "0.9", optional = true }
+is-terminal = { version = "0.4" }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+directories = { version = "5.0" }
+hmac = { version = "0.12" }
+async-trait = "0.1"
+unicode-normalization = "0.1"
+robotstxt = "0.3"
+
+[features]
+default = []
+# Optional headless-browser fallback provider. Requires a local
+# Chromium/Chrome install at runtime. Drives the upstream site's own
+# JavaScript to download subtitles when the plain HTTP providers are
+# blocked by Cloudflare or browser-gated endpoints.
+headless = ["dep:chromiumoxide", "dep:futures"]
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["full", "test-util"] }
+assert_cmd = "2.0"
+predicates = "3.1"
+wiremock = "0.6"
+serial_test = "3"
+libc = "0.2"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[build-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[[bin]]
+name = "youtube-legend-cli"
+path = "src/main.rs"
+
+[[bin]]
+name = "snapshot"
+path = "src/bin/snapshot.rs"
+
+[[test]]
+name = "corpus"
+path = "tests/integration/corpus.rs"
+
+[[test]]
+name = "rss"
+path = "tests/integration/rss.rs"
+
+[[test]]
+name = "offline_cache"
+path = "tests/integration/offline_cache.rs"
+
+[[test]]
+name = "provider_a_wiremock"
+path = "tests/integration/provider_a_wiremock.rs"
+
+[[test]]
+name = "provider_b_wiremock"
+path = "tests/integration/provider_b_wiremock.rs"
+
+[[test]]
+name = "signal_handler_stress"
+path = "tests/integration/signal_handler_stress.rs"
+
+[[example]]
+name = "single_url"
+path = "examples/single_url.rs"
+
+[[example]]
+name = "batch"
+path = "examples/batch.rs"
+
+[[example]]
+name = "json_output"
+path = "examples/json_output.rs"
+
+[[bench]]
+name = "cache_bench"
+harness = false

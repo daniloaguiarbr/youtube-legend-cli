@@ -1,0 +1,10 @@
+      - name: Module visibility sigilo gate (GAP-007)
+        run: |
+          COUNT=$(rg -c '^pub mod secret_endpoints' src/lib.rs || true)
+          if [ "$COUNT" != "0" ]; then
+            echo "::error::sigilo leak: 'pub mod secret_endpoints' exposed in src/lib.rs (GAP-007 regression)"
+            echo "Module must be 'pub(crate) mod secret_endpoints' — public exposure leaks sigilo hostnames in rustdoc."
+            exit 1
+          fi
+          echo "sigilo gate OK: secret_endpoints module is not publicly re-exported"
+

@@ -1,0 +1,41 @@
+# Exclui artefatos de build, memória local e docs de IA do pacote publicado
+/target/
+Cargo.lock
+
+# Backups genéricos (defesa em profundidade, redundante com [package] exclude)
+/*.bak
+/*.bak.*
+**/*.bak
+**/*.bak.*
+
+# GraphRAG — banco de memória local
+/graphrag.sqlite
+/graphrag.sqlite-shm
+/graphrag.sqlite-wal
+/graphrag.sqlite.bak
+/graphrag.sqlite.bak2
+
+# Documentação local de IA e PRDs
+/AGENTS.md
+/CLAUDE.md
+/docs_prd/
+/docs_rules/
+
+# Modulo com identificadores de provedores (INFORMACAO RESERVADA)
+/src/secret_endpoints.rs
+
+# Snapshots HTML de providers (podem conter URLs/tokens reais)
+/tests/fixtures/snapshots/
+
+# Journals de atomwrite (forense de crashes)
+/.atomwrite.journal.*
+**/.atomwrite.journal.*
+
+# Diretorios locais de trabalho
+/.archive/
+/.claude/
+
+# Ambiente e segredos
+.env
+.env.*
+*.local
