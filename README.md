@@ -2,12 +2,12 @@
 
 [![docs.rs](https://docs.rs/youtube-legend-cli/badge.svg)](https://docs.rs/youtube-legend-cli)
 [![Crates.io](https://img.shields.io/crates/v/youtube-legend-cli.svg)](https://crates.io/crates/youtube-legend-cli)
-[![v0.2.7](https://img.shields.io/badge/release-v0.2.7-blue.svg)](CHANGELOG.md)
+[![v0.2.8](https://img.shields.io/badge/release-v0.2.8-blue.svg)](CHANGELOG.md)
 [![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/youtube-legend-cli.svg)](LICENSE)
-[![MSRV 1.96.0](https://img.shields.io/badge/MSRV-1.96.0-blue.svg)](rust-toolchain.toml)
+[![MSRV 1.88.0](https://img.shields.io/badge/MSRV-1.88.0-blue.svg)](rust-toolchain.toml)
 [![CI](https://github.com/daniloaguiarbr/youtube-legend-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/daniloaguiarbr/youtube-legend-cli/actions/workflows/ci.yml)
 [![Downloads](https://img.shields.io/crates/d/youtube-legend-cli.svg)](https://crates.io/crates/youtube-legend-cli)
-[![Rust 1.96+](https://img.shields.io/badge/rust-1.96%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 Non-interactive Rust CLI that downloads YouTube subtitles through
 third-party providers, using a native Unix `stdin` / `stdout`
@@ -106,7 +106,7 @@ The crate ships two binaries:
 
 ## MSRV
 
-The Minimum Supported Rust Version is **1.96.0**, pinned in
+The Minimum Supported Rust Version is **1.88.0**, declared in
 `rust-toolchain.toml`. The MSRV job in CI builds and tests the crate
 on this version on every push.
 
@@ -175,7 +175,7 @@ cargo install --path .
 youtube-legend-cli --version
 ```
 
-Requires Rust 1.96.0 or newer. See `rust-toolchain.toml`.
+Requires Rust 1.88.0 or newer. See `Cargo.toml` `rust-version` field.
 
 ## Performance baseline
 

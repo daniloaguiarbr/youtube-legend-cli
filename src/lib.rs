@@ -57,8 +57,9 @@
 //!
 //! # Minimum supported Rust version (MSRV)
 //!
-//! `1.96.0` — see `rust-toolchain.toml` and `Cargo.toml`'s
-//! `rust-version` field.
+//! `1.88.0` — declared in `Cargo.toml` `rust-version` field.
+//! The local toolchain pinned via `rust-toolchain.toml` may be
+//! newer; the MSRV in `Cargo.toml` is the contract with users.
 
 #![warn(missing_docs)]
 #![warn(rustdoc::missing_crate_level_docs)]

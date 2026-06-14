@@ -42,6 +42,6 @@
 ## Optional
 - Source: https://github.com/danilo/youtube-legend-cli
 - License: dual MIT OR Apache-2.0
-- MSRV: 1.96.0
-- Categories: command-line-utilities, web-programming::scraping
+- MSRV: 1.88.0
+- Categories: command-line-utilities (the web-programming::scraping slug was deprecated on crates.io, see v0.2.7)
 - 12 CI jobs including deny, audit, public-api sigilo gate, semver-checks, cargo-install, matrix-os

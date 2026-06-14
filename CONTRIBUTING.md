@@ -21,7 +21,7 @@ security-sensitive problems.
 
 ## Development environment
 
-- Rust 1.96.0 or newer (CI runs stable, beta, and 1.96.0).
+- Rust 1.88.0 or newer (CI runs stable, beta, and the pinned toolchain).
 - `cargo fmt`, `cargo clippy`, `cargo test`, `cargo bench`, and
   `cargo doc` are the required tools. `mimalloc`, `criterion`,
   `wiremock`, `assert_cmd`, `predicates`, `serial_test`, and
@@ -73,7 +73,7 @@ high-level rules:
 
 ## Style
 
-- Rust edition 2021, MSRV 1.96.0.
+- Rust edition 2021, MSRV 1.88.0 (declared in Cargo.toml).
 - All public items must have a `///` doc comment.
 - All `unsafe` blocks must carry a `// SAFETY:` line that explains
   the invariant being upheld.

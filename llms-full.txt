@@ -99,7 +99,7 @@ On HTTP 429 the CLI honours the Retry-After header in both delta-seconds and RFC
 - RUSTFLAGS and RUSTDOCFLAGS both set to -D warnings
 - lychee offline link check
 - 6 cross-compile targets
-- msrv job pinned to 1.96.0
+- msrv job pinned to 1.88.0 (Cargo.toml rust-version); the local rust-toolchain.toml stays on the latest stable for reproducible development
 - sigilo gate in public-api job fails the build if pub mod secret_endpoints ever regresses in src/lib.rs
 
 ## Security
@@ -127,4 +127,4 @@ On HTTP 429 the CLI honours the Retry-After header in both delta-seconds and RFC
 - Authors: Danilo
 - Keywords: youtube, subtitles, cli, scraping, srt
 - Categories: command-line-utilities, web-programming::scraping
-- MSRV: 1.96.0 (pinned in rust-toolchain.toml)
+- MSRV: 1.88.0 (declared in Cargo.toml rust-version; the local rust-toolchain.toml is the development toolchain, not the MSRV contract)

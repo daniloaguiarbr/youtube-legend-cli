@@ -1,9 +1,9 @@
 [package]
 name = "youtube-legend-cli"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 default-run = "youtube-legend-cli"
-rust-version = "1.96.0"
+rust-version = "1.88.0"
 authors = ["Danilo <danilo@example.com>"]
 license = "MIT OR Apache-2.0"
 description = "Non-interactive Rust CLI that downloads YouTube subtitles through third-party providers, using a native Unix stdin/stdout interface."

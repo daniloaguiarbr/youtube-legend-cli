@@ -5,6 +5,11 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.8] - 2026-06-14
+
+### Fixed
+- `rust-version` in `Cargo.toml` over-declared `1.96.0` while the codebase compiles and tests cleanly on `1.88.0`. Lowered to `1.88.0` so users on stable Fedora (rustc 1.94.1) and the wider 1.88+ ecosystem can `cargo install youtube-legend-cli` without the cargo client refusing the manifest. The local `rust-toolchain.toml` remains on the latest stable (1.96.0) for reproducible development; the contract with end users lives in `Cargo.toml` `rust-version`.
+
 ## [0.2.7] - 2026-06-14
 
 ### Fixed
@@ -103,6 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Implementation plan in 8 phases.
 - 4 corpus URLs in `tests/fixtures/corpus.txt`.
 
+[0.2.8]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.7...v0.2.8
+[0.2.7]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.1.0...v0.2.6
 [0.1.0]: https://github.com/daniloaguiarbr/youtube-legend-cli/releases/tag/v0.1.0
 [0.0.1]: https://github.com/daniloaguiarbr/youtube-legend-cli/releases/tag/v0.0.1
