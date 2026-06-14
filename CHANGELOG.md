@@ -98,6 +98,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Implementation plan in 8 phases.
 - 4 corpus URLs in `tests/fixtures/corpus.txt`.
 
-[0.2.6]: https://github.com/danilo/youtube-legend-cli/compare/v0.1.0...v0.2.6
-[0.1.0]: https://github.com/danilo/youtube-legend-cli/releases/tag/v0.1.0
-[0.0.1]: https://github.com/danilo/youtube-legend-cli/releases/tag/v0.0.1
+[0.2.6]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.1.0...v0.2.6
+[0.1.0]: https://github.com/daniloaguiarbr/youtube-legend-cli/releases/tag/v0.1.0
+[0.0.1]: https://github.com/daniloaguiarbr/youtube-legend-cli/releases/tag/v0.0.1
