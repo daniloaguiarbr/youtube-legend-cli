@@ -23,8 +23,12 @@ Cargo.lock.bak
 /docs_prd/
 /docs_rules/
 
-# Modulo com identificadores de provedores (INFORMACAO RESERVADA)
-/src/secret_endpoints.rs
+# Modulo com identificadores de provedores: NECESSARIO no source
+# tree para o crate compilar. Sigilo via `pub(crate) mod` em
+# src/lib.rs (GAP-007): identifiers nao aparecem em rustdoc
+# publicado, apenas em binarios compilados. Decisao arquitetural:
+# manter no source tree (nao gitignored) e proteger visibilidade
+# em vez de tentar ocultar o arquivo.
 
 # Snapshots HTML de providers (podem conter URLs/tokens reais)
 /tests/fixtures/snapshots/

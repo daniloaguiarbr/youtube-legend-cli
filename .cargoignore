@@ -21,8 +21,9 @@ Cargo.lock
 /docs_prd/
 /docs_rules/
 
-# Modulo com identificadores de provedores (INFORMACAO RESERVADA)
-/src/secret_endpoints.rs
+# Modulo com identificadores de provedores: NAO excluir do
+# tarball (precisa estar para o crate compilar). Sigilo via
+# `pub(crate) mod` em src/lib.rs (GAP-007).
 
 # Snapshots HTML de providers (podem conter URLs/tokens reais)
 /tests/fixtures/snapshots/
