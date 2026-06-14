@@ -1,6 +1,6 @@
 [package]
 name = "youtube-legend-cli"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 default-run = "youtube-legend-cli"
 rust-version = "1.96.0"
@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 description = "Non-interactive Rust CLI that downloads YouTube subtitles through third-party providers, using a native Unix stdin/stdout interface."
 readme = "README.md"
 keywords = ["youtube", "subtitles", "cli", "scraping", "srt"]
-categories = ["command-line-utilities", "web-programming::scraping"]
+categories = ["command-line-utilities"]
 repository = "https://github.com/daniloaguiarbr/youtube-legend-cli"
 homepage = "https://github.com/daniloaguiarbr/youtube-legend-cli"
 documentation = "https://docs.rs/youtube-legend-cli"

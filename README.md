@@ -2,7 +2,7 @@
 
 [![docs.rs](https://docs.rs/youtube-legend-cli/badge.svg)](https://docs.rs/youtube-legend-cli)
 [![Crates.io](https://img.shields.io/crates/v/youtube-legend-cli.svg)](https://crates.io/crates/youtube-legend-cli)
-[![v0.2.6](https://img.shields.io/badge/release-v0.2.6-blue.svg)](CHANGELOG.md)
+[![v0.2.7](https://img.shields.io/badge/release-v0.2.7-blue.svg)](CHANGELOG.md)
 [![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/youtube-legend-cli.svg)](LICENSE)
 [![MSRV 1.96.0](https://img.shields.io/badge/MSRV-1.96.0-blue.svg)](rust-toolchain.toml)
 [![CI](https://github.com/daniloaguiarbr/youtube-legend-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/daniloaguiarbr/youtube-legend-cli/actions/workflows/ci.yml)
