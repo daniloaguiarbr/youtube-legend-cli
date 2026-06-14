@@ -1,9 +1,9 @@
-//! Extract and validate the 11-character YouTube video id from any
-//! recognized YouTube URL form.
+//! Extract and validate the 11-character `YouTube` video id from any
+//! recognized `YouTube` URL form.
 
 use crate::error::{AppError, AppResult};
 
-/// Parse a YouTube URL and return the 11-character video id.
+/// Parse a `YouTube` URL and return the 11-character video id.
 ///
 /// Supports the following URL forms:
 ///
@@ -17,8 +17,8 @@ use crate::error::{AppError, AppResult};
 /// # Errors
 ///
 /// - [`AppError::InvalidUrl`] if the input is not a syntactically valid URL,
-///   does not point to a YouTube host, or does not carry a video id in any
-///   of the supported forms, or if the extracted id is not exactly 11
+///   does not point to a `YouTube` host, or does not carry a video id in
+///   any of the supported forms, or if the extracted id is not exactly 11
 ///   characters of `[A-Za-z0-9_-]`.
 ///
 /// # Examples

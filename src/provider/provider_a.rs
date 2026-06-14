@@ -1,5 +1,5 @@
 //! First concrete [`Provider`]: scrapes an HTML index page, extracts a
-//! token, and follows the documented JSON and SubRip URLs.
+//! token, and follows the documented JSON and `SubRip` URLs.
 
 use async_trait::async_trait;
 use reqwest::Client;
@@ -258,7 +258,7 @@ fn filter_language_match(info: &Value, requested: &str) -> AppResult<()> {
 /// when the schema does not match `VideoObject` with a usable URL.
 ///
 /// Closes GAP-023: third-party index pages occasionally embed
-/// structured data pointing directly at the SubRip URL even when the
+/// structured data pointing directly at the `SubRip` URL even when the
 /// `/eyJ...` token is rendered via JavaScript that our scraper cannot
 /// reach.
 fn try_parse_json_ld(html: &str) -> Option<String> {

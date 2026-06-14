@@ -73,13 +73,13 @@ fn remember_failure(last_err: &mut Option<AppError>, e: AppError) {
 
 /// Subtitle delivery format.
 ///
-/// `Srt` preserves the raw SubRip text; `Txt` strips timestamps and
+/// `Srt` preserves the raw `SubRip` text; `Txt` strips timestamps and
 /// joins cues with blank lines. The variant is serialised in the
 /// `--json` envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Format {
-    /// SubRip text with timestamps preserved.
+    /// `SubRip` text with timestamps preserved.
     Srt,
     /// Plain text with timestamps removed.
     Txt,
@@ -111,7 +111,7 @@ impl Format {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SubtitleInfo {
-    /// 11-character YouTube video id.
+    /// 11-character `YouTube` video id.
     pub video_id: String,
     /// ISO 639-1 language code that matched.
     pub language: String,
@@ -128,6 +128,11 @@ pub struct SubtitleInfo {
 #[doc(alias = "Source")]
 #[doc(alias = "Upstream")]
 #[doc(alias = "Backend")]
+#[doc(alias = "pluggable")]
+#[doc(alias = "trait")]
+#[doc(alias = "async trait")]
+#[doc(alias = "subtitle source")]
+#[doc(alias = "upstream")]
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// Short human-readable identifier, used in tracing events.

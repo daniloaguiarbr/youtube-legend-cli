@@ -149,6 +149,15 @@ pub async fn output_success(
 /// Best-effort write of the error envelope to stdout when `--json` is
 /// set. Errors here are intentionally swallowed: the user already sees
 /// the error via the `tracing` / `Termination` path.
+///
+/// # Errors
+///
+/// Returns [`AppError::Io`], [`AppError::Serde`], or
+/// [`AppError::Internal`] when the envelope cannot be serialised or
+/// written to stdout. The error path itself is best-effort: callers
+/// should not treat a return value from this function as fatal because
+/// the original error has already been emitted via the regular
+/// `Termination` flow.
 pub async fn output_error(cli: &Cli, err: &AppError) -> AppResult<()> {
     if cli.json {
         let payload = JsonError {

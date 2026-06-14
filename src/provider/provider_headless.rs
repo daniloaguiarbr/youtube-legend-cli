@@ -43,7 +43,8 @@ const DOWNLOAD_JS: &str = r#"(async()=>{
   return JSON.stringify({lang:hlOf(btn.dataset.href),status:r.status,body});
 })()"#;
 
-/// Headless-browser provider. Construct with [`ProviderHeadless::new`].
+/// Headless-browser provider. Construct with [].
+#[cfg(feature = "headless")]
 pub struct ProviderHeadless {
     language: Option<String>,
     /// Subtitle bodies fetched during `fetch_subtitle`, keyed by the

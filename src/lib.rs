@@ -1,6 +1,6 @@
 //! `youtube-legend-cli` — a non-interactive Rust CLI for downloading
-//! YouTube subtitles through third-party providers, using a native Unix
-//! `stdin`/`stdout` interface.
+//! `YouTube` subtitles through third-party providers, using a native
+//! Unix `stdin`/`stdout` interface.
 //!
 //! # Quickstart
 //!
@@ -26,7 +26,7 @@
 //! - `provider` — the `Provider` trait and the two concrete
 //!   implementations, plus the `ProviderChain` that walks
 //!   them with one-request-per-second throttling.
-//! - [`parse`] — SRT text extraction and YouTube URL/video-id parsing.
+//! - [`parse`] — SRT text extraction and `YouTube` URL/video-id parsing.
 //! - [`cache`] — TTL-based local file cache keyed on
 //!   `(video_id, language, format)`.
 //! - [`retry`] — exponential backoff helper and in-memory circuit
@@ -61,18 +61,8 @@
 //! The local toolchain pinned via `rust-toolchain.toml` may be
 //! newer; the MSRV in `Cargo.toml` is the contract with users.
 
-#![warn(missing_docs)]
-#![warn(rustdoc::missing_crate_level_docs)]
-#![warn(rustdoc::broken_intra_doc_links)]
-#![warn(rustdoc::private_intra_doc_links)]
-#![warn(rustdoc::redundant_explicit_links)]
-#![warn(rustdoc::unescaped_backticks)]
-#![warn(rustdoc::invalid_codeblock_attributes)]
-#![deny(rustdoc::invalid_html_tags)]
-#![deny(rustdoc::invalid_rust_codeblocks)]
-#![deny(rustdoc::bare_urls)]
-#![deny(rustdoc::private_doc_tests)]
-#![warn(clippy::undocumented_unsafe_blocks)]
+// Lints centralizados em  no Cargo.toml (auditoria rules
+// rust docs v0.2.9). Não duplicar aqui para evitar override warnings.
 
 /// Cache subsystem: TTL-keyed local files for fetched subtitles.
 pub mod cache;

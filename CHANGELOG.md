@@ -113,3 +113,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 [0.2.6]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.1.0...v0.2.6
 [0.1.0]: https://github.com/daniloaguiarbr/youtube-legend-cli/releases/tag/v0.1.0
 [0.0.1]: https://github.com/daniloaguiarbr/youtube-legend-cli/releases/tag/v0.0.1
+
+## [0.2.9] - 2026-06-14
+
+### Added
+- `docs/ARCHITECTURE.md` (mermaid pipeline diagram, module map, stream
+  contract, provider pipeline, cancellation, MSRV section) and
+  `docs/decisions/0010-deferred-doc-cfg-migration.md` (MADR-format
+  ADR explaining why the `doc_auto_cfg → doc_cfg` migration is
+  deferred to v0.3.0).
+- Centralised `[lints.clippy]`, `[lints.rust]`, and `[lints.rustdoc]`
+  tables in `Cargo.toml` covering 12 official rustdoc lints plus
+  `clippy::doc_markdown`, `clippy::missing_errors_doc`,
+  `clippy::missing_panics_doc`, and `clippy::missing_safety_doc`.
+  The duplicated `#![warn/deny(...)]` block in `src/lib.rs` was
+  removed in favour of the single source of truth.
+- Expanded `#[doc(alias = "...")]` surface on `Cli`, `AppError`, and
+  the `Provider` trait to cover the SEO queries that would have been
+  served by the still-unstable `#[doc(keyword = "...")]` attribute.
+
+### Fixed
+- 18 clippy errors caught by the new centralised lints:
+  `clippy::doc_markdown` (15 missing-backticks in module- and
+  struct-level doc comments) and `clippy::missing_errors_doc` (3
+  `Result`-returning functions without a `# Errors` section) were
+  fixed across `src/lib.rs`, `src/cli.rs`, `src/commands/mod.rs`,
+  `src/error.rs`, `src/parse/video_id.rs`, `src/provider/mod.rs`,
+  `src/provider/provider_a.rs`, `src/provider/provider_b.rs`,
+  `src/retry.rs`, `src/bin/snapshot.rs`, and
+  `src/secret_endpoints.rs`.
+- `llms.txt` and `llms-full.txt` now point at
+  `github.com/daniloaguiarbr/youtube-legend-cli` (the user-facing
+  GitHub handle) instead of the stale `github.com/danilo/`. The
+  `## Docs` section in `llms.txt` is renamed to `## Documentation`
+  to match the llmstxt.org spec, and a new `## Architecture`
+  section summarises the pipeline for LLM consumers. The
+  `web-programming::scraping` category slug (deprecated by
+  crates.io since v0.2.7) is dropped from the `llms-full.txt`
+  `Categories` line.
+- Three stale `ci.yml.bak.*` snapshots in `.github/workflows/`
+  were removed (they were already covered by the `*.bak.*`
+  patterns in `.gitignore`).
+
+### Changed
+- `cargo clippy --all-features -- -D warnings`,
+  `cargo doc --no-deps --all-features`, and
+  `RUSTDOCFLAGS="-D warnings" cargo doc --all-features` now all
+  exit clean. This is the new quality bar enforced by CI.

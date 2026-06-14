@@ -18,6 +18,17 @@ use tokio::time::sleep;
 ///
 /// Each call to `op` is its own future; dropping the returned future
 /// at any `await` point cancels the in-flight `op` cleanly.
+///
+/// # Errors
+///
+/// Returns the last [`AppError`] produced by `op` after exhausting
+/// all `max_attempts` retries, with the following variants in scope:
+///
+/// - [`AppError::ProviderUnavailable`] when every upstream call failed
+/// - [`AppError::RateLimited`] when the last upstream call returned 429
+///   even after the backoff window
+/// - [`AppError::Http`] for transport-level errors that survived retries
+/// - [`AppError::Timeout`] when the cumulative wait exceeded the budget
 pub async fn retry_with_backoff<F, Fut, T>(mut op: F, max_attempts: u8) -> AppResult<T>
 where
     F: FnMut() -> Fut,

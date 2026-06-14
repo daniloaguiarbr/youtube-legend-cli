@@ -12,7 +12,7 @@
 //!
 //! Politica de governanca: a existencia deste pipeline de 2 provedores
 //! e segredo de implementacao. O README publico afirma apenas que a
-//! ferramenta baixa legendas do YouTube, sem nomear fontes.
+//! ferramenta baixa legendas do `YouTube`, sem nomear fontes.
 //!
 //! O `#![allow(missing_docs)]` no topo do arquivo e proposital:
 //! este modulo e interno e nunca aparece em rustdoc publicado,

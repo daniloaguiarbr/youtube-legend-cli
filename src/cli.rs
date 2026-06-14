@@ -18,7 +18,7 @@ use std::time::Duration;
 pub enum FormatArg {
     /// Plain text with timestamps removed.
     Txt,
-    /// Raw SubRip text with timestamps preserved.
+    /// Raw `SubRip` text with timestamps preserved.
     Srt,
 }
 
@@ -124,6 +124,10 @@ pub enum ColorArg {
 #[doc(alias = "Args")]
 #[doc(alias = "arguments")]
 #[doc(alias = "parser")]
+#[doc(alias = "CLI")]
+#[doc(alias = "command-line")]
+#[doc(alias = "clap")]
+#[doc(alias = "argument parser")]
 #[derive(Debug, Parser, Clone)]
 #[command(
     name = "youtube-legend-cli",
@@ -135,9 +139,9 @@ pub enum ColorArg {
     after_help = "Examples:\n  youtube-legend-cli https://youtu.be/dQw4w9WgXcQ\n  echo \"https://youtu.be/dQw4w9WgXcQ\" | youtube-legend-cli --format srt\n  cat urls.txt | youtube-legend-cli --batch --json\n  youtube-legend-cli --lang pt --timeout 60 https://youtu.be/dQw4w9WgXcQ",
 )]
 pub struct Cli {
-    /// YouTube URL in any of the supported forms (watch, shorts, embed,
-    /// youtu.be). Omit when piping a URL through stdin or when using
-    /// `--batch`.
+    /// `YouTube` URL in any of the supported forms (watch, shorts,
+    /// embed, youtu.be). Omit when piping a URL through stdin or when
+    /// using `--batch`.
     #[arg(
         value_name = "URL",
         help = "YouTube URL (watch, shorts, embed, or youtu.be)"
@@ -379,9 +383,16 @@ impl Cli {
         }
     }
 
-    /// Reject combinations of flags that would be impossible or surprising
+    /// Reject combinations of flags that would be impossible or surprenant
     /// to execute. Returns the first error message as a `String` so the
     /// caller can wrap it in [`crate::error::AppError::InvalidUsage`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(String)` when a flag combination is impossible:
+    ///
+    /// - `--batch` combined with a positional URL
+    /// - no URL, no stdin pipe, and no `--batch`
     pub fn validate(&self) -> Result<(), String> {
         if self.batch && self.url.is_some() {
             return Err("--batch cannot be combined with a positional url".to_string());

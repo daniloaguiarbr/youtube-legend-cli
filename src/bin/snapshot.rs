@@ -1,7 +1,7 @@
 //! `snapshot` companion binary: probes both providers and writes
 //! redacted HTML snapshots for drift detection.
 //!
-//! Reads a list of YouTube URLs from a corpus file, fetches the
+//! Reads a list of `YouTube` URLs from a corpus file, fetches the
 //! primary page from each provider with a configurable timeout, and
 //! stores the responses under a date-stamped subdirectory. Real
 //! provider hosts and paths are sourced from the gitignored
@@ -36,7 +36,7 @@ use secret_endpoints::{
     about = "Probe subtitle providers to capture redacted HTML snapshots for drift detection."
 )]
 struct Args {
-    /// Path to a corpus file with one YouTube URL per line.
+    /// Path to a corpus file with one `YouTube` URL per line.
     #[arg(long, default_value = "tests/fixtures/corpus.txt")]
     corpus: PathBuf,
 

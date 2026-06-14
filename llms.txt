@@ -2,15 +2,25 @@
 
 > Non-interactive Rust CLI for downloading YouTube subtitles through third-party providers via a native Unix stdin/stdout interface.
 
-## Docs
-- [README](https://github.com/danilo/youtube-legend-cli/blob/main/README.md): quickstart, flags, exit codes, install
-- [CHANGELOG](https://github.com/danilo/youtube-legend-cli/blob/main/CHANGELOG.md): release history following Keep a Changelog 1.1.0
+## Documentation
+- [README](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/README.md): quickstart, flags, exit codes, install
+- [CHANGELOG](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/CHANGELOG.md): release history following Keep a Changelog 1.1.0
 - [API reference](https://docs.rs/youtube-legend-cli): full rustdoc for every public item
-- [CONTRIBUTING](https://github.com/danilo/youtube-legend-cli/blob/main/CONTRIBUTING.md): dev workflow, MSRV, style
-- [SECURITY](https://github.com/danilo/youtube-legend-cli/blob/main/SECURITY.md): supported versions, threat model, reporting
-- [CODE_OF_CONDUCT](https://github.com/danilo/youtube-legend-cli/blob/main/CODE_OF_CONDUCT.md): Contributor Covenant 2.1
-- [docs/agent-teams-workflow.md](https://github.com/danilo/youtube-legend-cli/blob/main/docs/agent-teams-workflow.md): the Agent Teams playbook used to deliver v0.2.6
-- [docs/decisions/0009-cargo-toml-ownership-in-parallel-tasks.md](https://github.com/danilo/youtube-legend-cli/blob/main/docs/decisions/0009-cargo-toml-ownership-in-parallel-tasks.md): ADR-0009 (Cargo.toml serialisation under Agent Teams)
+- [CONTRIBUTING](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/CONTRIBUTING.md): dev workflow, MSRV, style
+- [SECURITY](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/SECURITY.md): supported versions, threat model, reporting
+- [CODE_OF_CONDUCT](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/CODE_OF_CONDUCT.md): Contributor Covenant 2.1
+- [docs/agent-teams-workflow.md](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/docs/agent-teams-workflow.md): the Agent Teams playbook used to deliver v0.2.6
+- [docs/decisions/0009-cargo-toml-ownership-in-parallel-tasks.md](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/docs/decisions/0009-cargo-toml-ownership-in-parallel-tasks.md): ADR-0009 (Cargo.toml serialisation under Agent Teams)
+
+## Architecture
+- clap-derived `Cli` with seven global flags and ten mode-specific flags
+- top-level `commands::run` dispatches between single-URL extract and batch mode
+- `ProviderChain` walks `ProviderA` then `ProviderB` with one-request-per-second throttling; falls back to `ProviderHeadless` when the `headless` Cargo feature is enabled
+- `retry::retry_with_backoff` wraps each upstream call with 1s/2s/4s attempts and honours `Retry-After` (delta-seconds or RFC 2822 date)
+- `provider::robots` consults the upstream `robots.txt` before any request; `Disallow` is reported as `EX_UNAVAILABLE`
+- `cache` persists `(video_id, language, format)` blobs under `~/.cache/youtube-legend-cli/` with a 24h TTL
+- `error::AppError` is a `thiserror` enum mapped to BSD `sysexits.h` exit codes (64, 65, 66, 69, 70, 78)
+- `mimalloc` is the global allocator; `secret_endpoints` and `text` are `pub(crate)` only
 
 ## Modules
 - [cli](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/cli/index.html): clap-derived argument parser and the Cli struct (17 flags incl. the 7 globals)
@@ -40,7 +50,7 @@
 - stdin accepts a single URL, a batch of one URL per line, or --batch flag input
 
 ## Optional
-- Source: https://github.com/danilo/youtube-legend-cli
+- Source: https://github.com/daniloaguiarbr/youtube-legend-cli
 - License: dual MIT OR Apache-2.0
 - MSRV: 1.88.0
 - Categories: command-line-utilities (the web-programming::scraping slug was deprecated on crates.io, see v0.2.7)

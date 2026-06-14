@@ -33,6 +33,11 @@ pub mod sysexits {
 #[doc(alias = "error")]
 #[doc(alias = "Error")]
 #[doc(alias = "cli_error")]
+#[doc(alias = "exit code")]
+#[doc(alias = "sysexits")]
+#[doc(alias = "BSD")]
+#[doc(alias = "error type")]
+#[doc(alias = "thiserror")]
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum AppError {
@@ -48,7 +53,7 @@ pub enum AppError {
     #[error("stdin is empty")]
     StdinEmpty,
 
-    /// A URL was syntactically valid but not a recognized YouTube URL.
+    /// A URL was syntactically valid but not a recognized `YouTube` URL.
     #[error("invalid url: {0}")]
     InvalidUrl(String),
 

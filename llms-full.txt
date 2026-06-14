@@ -120,11 +120,11 @@ On HTTP 429 the CLI honours the Retry-After header in both delta-seconds and RFC
 - run with cargo bench --bench cache_bench; CI compiles the bench target via cargo bench --no-run
 
 ## Optional
-- Repository: https://github.com/danilo/youtube-legend-cli
+\- Repository: https://github.com/daniloaguiarbr/youtube-legend-cli
 - Documentation: https://docs.rs/youtube-legend-cli
 - crates.io: https://crates.io/crates/youtube-legend-cli
 - License: dual MIT OR Apache-2.0
 - Authors: Danilo
 - Keywords: youtube, subtitles, cli, scraping, srt
-- Categories: command-line-utilities, web-programming::scraping
+\- Categories: command-line-utilities (the web-programming::scraping slug was deprecated on crates.io, see v0.2.7)
 - MSRV: 1.88.0 (declared in Cargo.toml rust-version; the local rust-toolchain.toml is the development toolchain, not the MSRV contract)

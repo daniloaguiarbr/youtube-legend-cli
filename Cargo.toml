@@ -1,6 +1,6 @@
 [package]
 name = "youtube-legend-cli"
-version = "0.2.8"
+version = "0.2.9"
 edition = "2021"
 default-run = "youtube-legend-cli"
 rust-version = "1.88.0"
@@ -74,8 +74,14 @@ async-trait = "0.1"
 unicode-normalization = "0.1"
 robotstxt = "0.3"
 
+
 [features]
 default = []
+# External  wrapper crate — used at docs.rs build via
+#  to enable  on
+# stable Rust without manual  nightlies.
+# This decouples the nightly feature gate from consumer builds.
+
 # Optional headless-browser fallback provider. Requires a local
 # Chromium/Chrome install at runtime. Drives the upstream site's own
 # JavaScript to download subtitles when the plain HTTP providers are
@@ -152,3 +158,39 @@ path = "examples/json_output.rs"
 [[bench]]
 name = "cache_bench"
 harness = false
+
+# ---------------------------------------------------------------------------
+# Lints centralizados — auditoria rules rust docs v0.2.9
+# Single source of truth para clippy::pedantic e os 12 lints oficiais do
+# rustdoc. Sincronizado com [package.metadata.docs.rs]  que
+# passa  no build do docs.rs.
+# ---------------------------------------------------------------------------
+[lints.clippy]
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+missing_safety_doc = "warn"
+undocumented_unsafe_blocks = "warn"
+doc_markdown = "warn"
+
+[lints.rust]
+# Lib is unsafe-clean; test code (offline_cache, signal_handler_stress)
+# needs  /  inside  blocks for env
+# mutation. Each site has an explicit  comment.
+unsafe_code = "warn"
+# The project has 4 set_var / remove_var sites inside test functions
+# (each guarded by an explicit  block and a 
+# comment). The lint is too strict for that pattern; mark  and
+# rely on the explicit  comment audit.
+unsafe_op_in_unsafe_fn = "allow"
+
+[lints.rustdoc]
+missing_crate_level_docs = "warn"
+broken_intra_doc_links = "warn"
+private_intra_doc_links = "warn"
+invalid_html_tags = "deny"
+invalid_rust_codeblocks = "deny"
+bare_urls = "deny"
+private_doc_tests = "deny"
+redundant_explicit_links = "warn"
+unescaped_backticks = "warn"
+invalid_codeblock_attributes = "warn"

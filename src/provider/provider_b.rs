@@ -186,9 +186,9 @@ impl ProviderB {
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct PageVars {
-    /// Original YouTube URL echoed back by the page.
+    /// Original `YouTube` URL echoed back by the page.
     pub url: String,
-    /// `var sid=...`
+    /// `var sid=...`: the obfuscated session id
     pub sid: String,
     /// `var hl=...`
     pub hl: String,
