@@ -1,5 +1,7 @@
 # Contributor Covenant Code of Conduct
 
+[English](CODE_OF_CONDUCT.md) | [Português Brasileiro](CODE_OF_CONDUCT.pt-BR.md)
+
 ## Our pledge
 
 We as members, contributors, and leaders pledge to make participation in

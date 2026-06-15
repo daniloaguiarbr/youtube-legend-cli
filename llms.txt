@@ -1,5 +1,7 @@
 # youtube-legend-cli
 
+[English](llms.txt) | [Português Brasileiro](llms.pt-BR.txt)
+
 > Non-interactive Rust CLI for downloading YouTube subtitles through third-party providers via a native Unix stdin/stdout interface.
 
 ## Documentation

@@ -1,10 +1,19 @@
-//! TTL-keyed local file cache for fetched subtitles.
+//! TTL-keyed local file cache for fetched subtitles, plus
+//! versioned caches for the `YouTube` `player.js` blob and the
+//! operations table extracted from it.
 //!
-//! The cache lives under the user's standard cache directory
-//! (e.g. `~/.cache/youtube-legend-cli/`) and is keyed on the
-//! `(video_id, language, format)` triple. Each entry's freshness is
-//! decided by the file's modification time compared to the TTL passed
-//! to `cache_path`; expired entries are removed on read.
+//! The original `cache_path` / `read_cache` / `write_cache` helpers
+//! (moved from the legacy `src/cache.rs` file) keep their public
+//! signatures so callers outside this module are unaffected.
+//!
+//! New in v0.3.0:
+//!
+//! - \[`crate::cache::player_js_cache`\] — versioned on-disk TTL cache for the
+//!   `player.js` blob, with single-flight concurrency control.
+//! - \[`crate::cache::operations_cache`\] — process-local map of parsed
+//!   `JsOperation` tables keyed by player version.
+
+#![allow(dead_code)]
 
 use crate::error::{AppError, AppResult};
 use directories::ProjectDirs;
@@ -21,7 +30,7 @@ const FALLBACK_QUALIFIER: &str = "youtube-legend-cli";
 ///
 /// # Errors
 ///
-/// - [`AppError::InvalidInput`] when any of the components is empty or
+/// - \[`crate::error::AppError::InvalidInput`\] when any of the components is empty or
 ///   the TTL is zero.
 /// - [`AppError::Internal`] when the platform's project directory cannot
 ///   be determined.
@@ -168,6 +177,9 @@ pub fn default_ttl() -> Duration {
     Duration::from_secs(DEFAULT_TTL_HOURS * 3600)
 }
 
+pub mod operations_cache;
+pub mod player_js_cache;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,15 +193,16 @@ mod tests {
     #[test]
     #[serial]
     fn qualifier_prefers_env_var() {
-        // SAFETY: `std::env::set_var` is `unsafe` in Rust 2024 because it
-        // mutates process-global state. The `#[serial]` attribute from
-        // `serial_test` ensures no other test in this binary runs
-        // concurrently; the env var is removed at the end of the test.
+        // SAFETY: `std::env::set_var` and `std::env::remove_var` are
+        // process-global mutations, but this test is marked `#[serial]`
+        // so the surrounding test runner guarantees no concurrent
+        // reads of `ENV_QUALIFIER` while the mutation is in flight.
         unsafe {
             std::env::set_var(ENV_QUALIFIER, "test-author");
         }
         let q = qualifier_from_env();
-        // SAFETY: same as above, paired with the set_var above.
+        // SAFETY: same rationale as the `set_var` above; the serial
+        // harness still owns the test thread.
         unsafe {
             std::env::remove_var(ENV_QUALIFIER);
         }
@@ -200,15 +213,17 @@ mod tests {
     #[serial]
     fn qualifier_falls_back_to_home() {
         let original = std::env::var(ENV_QUALIFIER).ok();
-        // SAFETY: `std::env::set_var` / `remove_var` mutate process-global
-        // state. The `#[serial]` attribute ensures exclusive access; the
-        // original value is captured and restored before returning.
+        // SAFETY: `set_var`/`remove_var` are process-global; the
+        // `#[serial]` attribute on this test serialises it against
+        // every other test that touches `ENV_QUALIFIER` or `HOME`.
         unsafe {
             std::env::remove_var(ENV_QUALIFIER);
             std::env::set_var("HOME", "/home/test-user");
         }
         let q = qualifier_from_env();
-        // SAFETY: restoration paired with the set_var above.
+        // SAFETY: paired with the set_var above; restores the
+        // previous value (or removes the override) so subsequent
+        // tests observe a clean environment.
         unsafe {
             std::env::remove_var("HOME");
             if let Some(v) = original {

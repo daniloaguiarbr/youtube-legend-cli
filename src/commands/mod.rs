@@ -1,6 +1,6 @@
 //! Top-level command dispatch: extract one URL or batch many.
 
-use crate::cli::Cli;
+use crate::cli::{Cli, ProviderChoice};
 use crate::error::{AppError, AppResult};
 use crate::parse::srt_to_text;
 use crate::parse::video_id::extract_video_id;
@@ -36,7 +36,7 @@ struct JsonError {
 ///
 /// - [`AppError::InvalidUsage`] when the [`Cli::validate`] check fails.
 /// - All provider / network / cache / IO errors bubble up.
-#[tracing::instrument(level = "debug", err, skip(cli), fields(batch = cli.batch, url = ?cli.url, json = cli.json, verbose = cli.verbose))]
+#[tracing::instrument(level = "debug", err, skip(cli), fields(batch = cli.batch, url = ?cli.url, json = cli.json, verbose = cli.verbose, provider = ?cli.provider, asr = cli.asr, no_fallback = cli.no_fallback))]
 pub async fn run(cli: Cli) -> AppResult<ExitCode> {
     if let Err(msg) = cli.validate() {
         return Err(AppError::InvalidUsage(msg));
@@ -51,24 +51,103 @@ pub async fn run(cli: Cli) -> AppResult<ExitCode> {
     }
 }
 
+/// Build the [`ProviderChain`] for a given [`Cli`].
+///
+/// # Chain order
+///
+/// The order of providers tried at runtime is the order they are
+/// pushed into the `Vec` passed to [`ProviderChain::new`]. The
+/// following table defines what each [`ProviderChoice`] maps to:
+///
+/// | `--provider`          | Chain order (try in this sequence)            |
+/// |-----------------------|------------------------------------------------|
+/// | `auto` (default)      | `youtube-direct` → `provider-a` → `provider-b` → [`provider-headless`] |
+/// | `youtube-direct`      | `youtube-direct` only                           |
+/// | `provider-a`          | `provider-a` only (v0.2.9 regression)         |
+/// | `provider-b`          | `provider-b` only (v0.2.9 regression)         |
+/// | `provider-headless`   | `provider-headless` only (feature-gated)     |
+///
+/// `provider-headless` is only appended when the crate was built
+/// with the `headless` feature; otherwise the chain ends at
+/// `provider-b`.
+///
+/// `--no-fallback` short-circuits the `auto` chain to only the
+/// `youtube-direct` provider. The flag is rejected at validation
+/// time when paired with any other provider (see [`Cli::validate`]).
+///
+/// `--asr` is propagated to the direct provider via
+/// [`ProviderYouTubeDirect::prefer_asr`]. The flag is rejected at
+/// validation time when paired with a non-direct provider.
+#[tracing::instrument(level = "debug", skip(cli), fields(provider = ?cli.provider, asr = cli.asr, no_fallback = cli.no_fallback))]
 fn build_provider_chain(cli: &Cli) -> ProviderChain {
     use crate::provider::provider_a::ProviderA;
     use crate::provider::provider_b::ProviderB;
+    use crate::provider::provider_youtube_direct::ProviderYouTubeDirect;
 
     let user_agent = cli.effective_user_agent();
     let mut providers: Vec<Box<dyn crate::provider::Provider>> = Vec::new();
-    if let Ok(p) = ProviderA::with_user_agent(&user_agent) {
-        providers.push(Box::new(p));
+
+    // Resolve the effective strategy once. Defaults to `Auto` when
+    // the user did not pass `--provider` (CLI flag or TOML override).
+    let choice = cli.provider.unwrap_or(ProviderChoice::Auto);
+
+    match choice {
+        ProviderChoice::Auto => {
+            // Order: youtube-direct -> provider-a -> provider-b -> [provider-headless].
+            // When `--no-fallback` is set, the chain collapses to the
+            // direct provider only.
+            if let Ok(direct) =
+                ProviderYouTubeDirect::with_user_agent(&user_agent).map(|p| p.prefer_asr(cli.asr))
+            {
+                providers.push(Box::new(direct));
+            }
+            if !cli.no_fallback {
+                if let Ok(p) = ProviderA::with_user_agent(&user_agent) {
+                    providers.push(Box::new(p));
+                }
+                if let Ok(p) = ProviderB::with_user_agent(&user_agent) {
+                    providers.push(Box::new(p));
+                }
+                #[cfg(feature = "headless")]
+                {
+                    let hl = crate::provider::provider_headless::ProviderHeadless::new()
+                        .with_language(language_to_str(cli.lang));
+                    providers.push(Box::new(hl));
+                }
+            }
+        }
+        ProviderChoice::YoutubeDirect => {
+            if let Ok(direct) =
+                ProviderYouTubeDirect::with_user_agent(&user_agent).map(|p| p.prefer_asr(cli.asr))
+            {
+                providers.push(Box::new(direct));
+            }
+        }
+        ProviderChoice::ProviderA => {
+            if let Ok(p) = ProviderA::with_user_agent(&user_agent) {
+                providers.push(Box::new(p));
+            }
+        }
+        ProviderChoice::ProviderB => {
+            if let Ok(p) = ProviderB::with_user_agent(&user_agent) {
+                providers.push(Box::new(p));
+            }
+        }
+        ProviderChoice::ProviderHeadless => {
+            #[cfg(feature = "headless")]
+            {
+                let hl = crate::provider::provider_headless::ProviderHeadless::new()
+                    .with_language(language_to_str(cli.lang));
+                providers.push(Box::new(hl));
+            }
+            // Without the feature flag, the chain is empty and the
+            // caller surfaces `AppError::ProviderUnavailable` via the
+            // chain's exhaustive walk. This preserves the explicit
+            // intent (the user asked for headless) without silently
+            // promoting a fallback.
+        }
     }
-    if let Ok(p) = ProviderB::with_user_agent(&user_agent) {
-        providers.push(Box::new(p));
-    }
-    #[cfg(feature = "headless")]
-    {
-        let hl = crate::provider::provider_headless::ProviderHeadless::new()
-            .with_language(language_to_str(cli.lang));
-        providers.push(Box::new(hl));
-    }
+
     ProviderChain::new(providers)
 }
 

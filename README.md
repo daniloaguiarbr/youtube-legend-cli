@@ -1,5 +1,10 @@
 # youtube-legend-cli
 
+
+> Non-interactive Rust CLI that streams YouTube subtitles straight to stdout, with no daemon, no prompts, and no telemetry.
+
+[English](README.md) | [Português Brasileiro](README.pt-BR.md)
+
 [![docs.rs](https://docs.rs/youtube-legend-cli/badge.svg)](https://docs.rs/youtube-legend-cli)
 [![Crates.io](https://img.shields.io/crates/v/youtube-legend-cli.svg)](https://crates.io/crates/youtube-legend-cli)
 [![v0.2.8](https://img.shields.io/badge/release-v0.2.8-blue.svg)](CHANGELOG.md)
@@ -178,6 +183,71 @@ youtube-legend-cli --version
 Requires Rust 1.88.0 or newer. See `Cargo.toml` `rust-version` field.
 
 ## Performance baseline
+
+
+## Providers (v0.3.0+)
+
+The crate ships four subtitle providers. The CLI tries them in
+the order documented below under `--provider` until one returns a
+non-empty subtitle. The `Provider` trait stays unchanged from
+v0.2.x — every provider implements the same `fetch_subtitle`
+contract, so swapping or chaining is transparent to the rest of
+the pipeline.
+
+| Provider | Source | When it works | Fallback role |
+|----------|--------|---------------|---------------|
+| `youtube-direct` | YouTube watch page + `ytInitialPlayerResponse` + `timedtext` endpoint | Default for almost every video with any caption track (manual or ASR) | Primary in the `auto` chain since v0.3.0 |
+| `provider_a` | Third-party HTTP service analogous to downsub.com | Videos that the third-party service has indexed | Secondary in the `auto` chain |
+| `provider_b` | Second third-party HTTP service with AES-256-CBC + PBKDF2 token signing | Videos that the second third-party service has indexed | Tertiary in the `auto` chain |
+| `provider_headless` | Local Chromium driven by `chromiumoxide` (gated by the `headless` feature) | Cloudflare or browser-gated endpoints that block the plain HTTP providers | Opt-in fallback; never enabled by default |
+
+### YouTube Direct Provider
+
+The YouTube-direct provider is the resolution for `GAP-001`. It
+fetches the watch page, parses `ytInitialPlayerResponse`, picks
+the right `captionTracks` entry, and downloads the timedtext
+payload directly from `https://www.youtube.com/api/timedtext`.
+It handles manual and auto-generated captions, signature
+parameters, the `n` challenge, and caches the `player.js`
+operations table in `~/.cache/youtube-legend-cli/player/` for
+seven days.
+
+```bash
+# Manual or auto-generated Portuguese, falling back through the chain
+youtube-legend-cli https://youtu.be/Ze0i7zxpyrw --lang pt --provider youtube-direct --asr
+```
+
+The `--asr` flag makes the provider prefer the auto-generated
+track (`kind: "asr"`) even when a manual track is also present.
+Without `--asr`, the provider picks the manual track when
+available and only falls back to ASR when nothing else exists.
+The `--no-fallback` flag restricts the chain to the chosen
+provider so a single misbehaving upstream cannot mask the real
+behaviour of the others.
+
+### Provider Selection
+
+`--provider` accepts the values in the table below. `auto` is
+the default and the recommended choice for production
+pipelines. The chain order in `auto` mode is `youtube-direct`
+then `provider_a` then `provider_b`; `provider_headless` only
+joins the chain when the binary was built with the `headless`
+feature.
+
+| Value | Effect |
+|-------|--------|
+| `auto` | Try `youtube-direct` first, then `provider_a`, then `provider_b`, then the headless provider if enabled. |
+| `youtube-direct` | Only the YouTube-direct provider. Disables every other provider for the run. |
+| `provider_a` | Only `provider_a`. Reproduces the v0.2.x default chain. |
+| `provider_b` | Only `provider_b`. Reproduces the v0.2.x alternative path. |
+| `provider_headless` | Only the headless provider. Requires `--features headless` at build time. |
+
+The `--provider` and `--asr` flags compose: `--asr` propagates
+to the chosen provider, which decides whether to prefer the
+auto-generated track. `--asr --provider provider-a` is rejected
+with exit code `64` (`EX_USAGE`) because the third-party
+providers do not expose a manual-versus-ASR selection.
+
 
 Three micro-benchmarks live in `benches/cache_bench.rs`:
 

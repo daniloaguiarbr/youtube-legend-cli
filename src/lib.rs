@@ -61,7 +61,7 @@
 //! The local toolchain pinned via `rust-toolchain.toml` may be
 //! newer; the MSRV in `Cargo.toml` is the contract with users.
 
-// Lints centralizados em  no Cargo.toml (auditoria rules
+// Lints centralizados em [lints.clippy]/[lints.rust]/[lints.rustdoc] no Cargo.toml (auditoria rules
 // rust docs v0.2.9). Não duplicar aqui para evitar override warnings.
 
 /// Cache subsystem: TTL-keyed local files for fetched subtitles.

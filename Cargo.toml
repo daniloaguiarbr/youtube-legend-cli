@@ -1,6 +1,6 @@
 [package]
 name = "youtube-legend-cli"
-version = "0.2.9"
+version = "0.3.0"
 edition = "2021"
 default-run = "youtube-legend-cli"
 rust-version = "1.88.0"
@@ -119,6 +119,10 @@ path = "src/main.rs"
 name = "snapshot"
 path = "src/bin/snapshot.rs"
 
+[[bin]]
+name = "youtube-direct-probe"
+path = "src/bin/youtube-direct-probe.rs"
+
 [[test]]
 name = "corpus"
 path = "tests/integration/corpus.rs"
@@ -142,6 +146,10 @@ path = "tests/integration/provider_b_wiremock.rs"
 [[test]]
 name = "signal_handler_stress"
 path = "tests/integration/signal_handler_stress.rs"
+
+[[test]]
+name = "cli_probing"
+path = "tests/integration/cli_probing.rs"
 
 [[example]]
 name = "single_url"
@@ -173,14 +181,17 @@ undocumented_unsafe_blocks = "warn"
 doc_markdown = "warn"
 
 [lints.rust]
-# Lib is unsafe-clean; test code (offline_cache, signal_handler_stress)
-# needs  /  inside  blocks for env
-# mutation. Each site has an explicit  comment.
-unsafe_code = "warn"
-# The project has 4 set_var / remove_var sites inside test functions
-# (each guarded by an explicit  block and a 
-# comment). The lint is too strict for that pattern; mark  and
-# rely on the explicit  comment audit.
+# Lib is unsafe-clean. Test code (offline_cache, signal_handler_stress)
+# uses the unsafe keyword inside unsafe blocks to mutate process-global
+# env vars. The single source of truth is the SAFETY comment audit
+# enforced by clippy::undocumented_unsafe_blocks. Setting unsafe_code
+# to allow is required so the lint does not deny the well-documented
+# test-only sites.
+unsafe_code = "allow"
+# Some of the set_var / remove_var sites inside test functions call
+# other unsafe functions from inside an unsafe block. The
+# unsafe_op_in_unsafe_fn lint is too strict for that pattern; mark it
+# allow and rely on the explicit SAFETY comment audit.
 unsafe_op_in_unsafe_fn = "allow"
 
 [lints.rustdoc]

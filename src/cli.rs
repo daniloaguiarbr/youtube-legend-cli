@@ -6,6 +6,7 @@
 
 use crate::error::AppResult;
 use clap::{ArgAction, Parser, ValueEnum};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -117,6 +118,41 @@ pub enum ColorArg {
     Always,
     /// Never emit ANSI colour escapes.
     Never,
+}
+
+/// Provider selection strategy for the subtitle-fetch chain.
+///
+/// The `auto` mode (default) walks `ProviderYouTubeDirect` first and
+/// then falls back to the third-party providers. Explicit values
+/// (`youtube-direct`, `provider-a`, `provider-b`, `provider-headless`)
+/// pin the chain to a single provider, restoring the v0.2.9
+/// behaviour for the named provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ProviderChoice {
+    /// Walk the full chain (YouTube-direct first, then fallbacks).
+    Auto,
+    /// Only the direct `YouTube` provider.
+    YoutubeDirect,
+    /// Only the third-party `provider_a`.
+    ProviderA,
+    /// Only the third-party `provider_b`.
+    ProviderB,
+    /// Only the headless browser provider (feature-gated).
+    ProviderHeadless,
+}
+
+impl ProviderChoice {
+    /// Lowercase kebab-case identifier used in TOML and tracing.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::YoutubeDirect => "youtube-direct",
+            Self::ProviderA => "provider-a",
+            Self::ProviderB => "provider-b",
+            Self::ProviderHeadless => "provider-headless",
+        }
+    }
 }
 
 /// Parsed command-line arguments. See `youtube-legend-cli --help` for the
@@ -297,6 +333,41 @@ pub struct Cli {
         help = "Disable reads from the local cache"
     )]
     pub no_cache: bool,
+
+    /// Provider selection strategy. `auto` (default) tries the
+    /// direct `YouTube` provider first, then falls back to
+    /// `provider-a`, `provider-b`, and (under the `headless` feature)
+    /// `provider-headless`. Explicit values pin the chain to a
+    /// single provider.
+    #[arg(
+        long,
+        value_name = "PROVIDER",
+        help = "Provider selection: auto, youtube-direct, provider-a, provider-b, provider-headless",
+        default_value = "auto",
+        value_enum
+    )]
+    pub provider: Option<ProviderChoice>,
+
+    /// Prefer auto-generated (ASR) captions when multiple tracks are
+    /// available in the requested language. Only the `youtube-direct`
+    /// provider honours this flag; combining it with another
+    /// provider is rejected at validation time.
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
+        help = "Prefer auto-generated (ASR) captions; only valid with youtube-direct"
+    )]
+    pub asr: bool,
+
+    /// When `--provider auto` is set, disable the fallback chain so
+    /// only `youtube-direct` is consulted. Has no effect when an
+    /// explicit provider is named.
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
+        help = "Disable fallbacks in --provider auto (youtube-direct only)"
+    )]
+    pub no_fallback: bool,
 }
 
 impl Cli {
@@ -393,6 +464,10 @@ impl Cli {
     ///
     /// - `--batch` combined with a positional URL
     /// - no URL, no stdin pipe, and no `--batch`
+    /// - `--asr` combined with a non-direct provider (only
+    ///   `youtube-direct` honours auto-generated captions)
+    /// - `--no-fallback` combined with an explicit provider (the flag
+    ///   is only meaningful under `--provider auto`)
     pub fn validate(&self) -> Result<(), String> {
         if self.batch && self.url.is_some() {
             return Err("--batch cannot be combined with a positional url".to_string());
@@ -417,6 +492,25 @@ impl Cli {
         }
         if self.dry_run && self.batch {
             return Err("--dry-run cannot be combined with --batch".to_string());
+        }
+        if let Some(provider) = self.provider {
+            if self.asr
+                && !matches!(
+                    provider,
+                    ProviderChoice::Auto | ProviderChoice::YoutubeDirect
+                )
+            {
+                return Err(format!(
+                    "--asr is only valid with --provider auto or --provider youtube-direct (got --provider {})",
+                    provider.as_str()
+                ));
+            }
+            if self.no_fallback && !matches!(provider, ProviderChoice::Auto) {
+                return Err(format!(
+                    "--no-fallback is only valid with --provider auto (got --provider {})",
+                    provider.as_str()
+                ));
+            }
         }
         Ok(())
     }
@@ -589,6 +683,35 @@ pub fn load_config(path: &std::path::Path) -> AppResult<ConfigOverrides> {
                         .ok_or_else(|| invalid_type(key, "boolean"))?,
                 )
             }
+            "provider" => {
+                let raw = value.as_str().ok_or_else(|| invalid_type(key, "string"))?;
+                out.provider = Some(match raw {
+                    "auto" => ProviderChoice::Auto,
+                    "youtube-direct" => ProviderChoice::YoutubeDirect,
+                    "provider-a" => ProviderChoice::ProviderA,
+                    "provider-b" => ProviderChoice::ProviderB,
+                    "provider-headless" => ProviderChoice::ProviderHeadless,
+                    other => {
+                        return Err(AppError::InvalidInput(format!(
+                            "config: invalid provider `{other}` (expected auto|youtube-direct|provider-a|provider-b|provider-headless)"
+                        )))
+                    }
+                });
+            }
+            "asr" => {
+                out.asr = Some(
+                    value
+                        .as_bool()
+                        .ok_or_else(|| invalid_type(key, "boolean"))?,
+                )
+            }
+            "no_fallback" => {
+                out.no_fallback = Some(
+                    value
+                        .as_bool()
+                        .ok_or_else(|| invalid_type(key, "boolean"))?,
+                )
+            }
             "log_level" => {
                 let raw = value.as_str().ok_or_else(|| invalid_type(key, "string"))?;
                 out.log_level = Some(match raw {
@@ -671,6 +794,9 @@ pub struct ConfigOverrides {
     pub log_level: Option<LogLevelArg>,
     pub log_format: Option<LogFormatArg>,
     pub color: Option<ColorArg>,
+    pub provider: Option<ProviderChoice>,
+    pub asr: Option<bool>,
+    pub no_fallback: Option<bool>,
 }
 
 impl Cli {
@@ -758,6 +884,19 @@ impl Cli {
         if matches!(self.color, ColorArg::Auto) {
             if let Some(c) = cfg.color {
                 self.color = c;
+            }
+        }
+        if self.provider.is_none() {
+            self.provider = cfg.provider;
+        }
+        if !self.asr {
+            if let Some(v) = cfg.asr {
+                self.asr = v;
+            }
+        }
+        if !self.no_fallback {
+            if let Some(v) = cfg.no_fallback {
+                self.no_fallback = v;
             }
         }
     }
@@ -1119,5 +1258,77 @@ color = "never"
             FormatArg::Txt => "txt",
             FormatArg::Srt => "srt",
         }
+    }
+
+    #[test]
+    fn provider_choice_parses_all_variants() {
+        use crate::cli::ProviderChoice;
+        let cases = [
+            ("auto", ProviderChoice::Auto),
+            ("youtube-direct", ProviderChoice::YoutubeDirect),
+            ("provider-a", ProviderChoice::ProviderA),
+            ("provider-b", ProviderChoice::ProviderB),
+            ("provider-headless", ProviderChoice::ProviderHeadless),
+        ];
+        for (flag, expected) in cases {
+            let cli = Cli::parse_from([
+                "youtube-legend-cli",
+                "https://youtu.be/dQw4w9WgXcQ",
+                "--provider",
+                flag,
+            ]);
+            assert_eq!(cli.provider, Some(expected), "failed for {flag}");
+        }
+    }
+
+    #[test]
+    fn asr_flag_propagates_to_provider() {
+        let cli = Cli::parse_from([
+            "youtube-legend-cli",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "--provider",
+            "youtube-direct",
+            "--asr",
+        ]);
+        assert!(cli.asr);
+        assert!(cli.validate().is_ok());
+
+        // Reject with provider-a.
+        let cli = Cli::parse_from([
+            "youtube-legend-cli",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "--provider",
+            "provider-a",
+            "--asr",
+        ]);
+        let err = cli.validate().unwrap_err();
+        assert!(err.contains("--asr"), "actual: {err}");
+        assert!(err.contains("provider-a"), "actual: {err}");
+    }
+
+    #[test]
+    fn no_fallback_blocks_provider_a() {
+        // --no-fallback is only valid with --provider auto.
+        let cli = Cli::parse_from([
+            "youtube-legend-cli",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "--provider",
+            "provider-a",
+            "--no-fallback",
+        ]);
+        let err = cli.validate().unwrap_err();
+        assert!(err.contains("--no-fallback"), "actual: {err}");
+        assert!(err.contains("provider-a"), "actual: {err}");
+
+        // Valid combo: --no-fallback with --provider auto.
+        let cli = Cli::parse_from([
+            "youtube-legend-cli",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "--provider",
+            "auto",
+            "--no-fallback",
+        ]);
+        assert!(cli.no_fallback);
+        assert!(cli.validate().is_ok());
     }
 }

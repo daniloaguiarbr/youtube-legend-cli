@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<transcript>
+  <text start="0.0" dur="2.5">Hello, world.</text>
+  <text start="2.5" dur="3.0">This is a sample English cue.</text>
+  <text start="5.5" dur="2.0">Third line with apostrophe: it's working.</text>
+</transcript>

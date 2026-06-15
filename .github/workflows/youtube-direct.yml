@@ -1,0 +1,35 @@
+name: youtube-direct
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: provider::youtube + cli_probing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Build (locked, no network surprises)
+        run: cargo build --locked --all-features
+      - name: Library tests for the YouTube-direct provider
+        run: cargo test --lib --locked --all-features provider::youtube
+      - name: CLI probing integration tests
+        run: cargo test --test cli_probing --locked --all-features
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings

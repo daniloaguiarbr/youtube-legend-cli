@@ -1,5 +1,6 @@
 //! SRT text extraction and YouTube URL / video-id parsing.
 
+pub mod srv3;
 pub mod video_id;
 
 use crate::error::{AppError, AppResult};

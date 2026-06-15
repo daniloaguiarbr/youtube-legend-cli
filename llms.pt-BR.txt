@@ -1,0 +1,59 @@
+# youtube-legend-cli
+
+[English](llms.txt) | [Português Brasileiro](llms.pt-BR.txt)
+
+> CLI Rust não interativa para baixar legendas do YouTube através de provedores terceirizados via uma interface Unix nativa de stdin/stdout.
+
+## Documentação
+- [README](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/README.md): quickstart, flags, exit codes, instalação
+- [CHANGELOG](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/CHANGELOG.md): histórico de releases seguindo Keep a Changelog 1.1.0
+- [API reference](https://docs.rs/youtube-legend-cli): rustdoc completo de cada item público
+- [CONTRIBUTING](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/CONTRIBUTING.md): fluxo de desenvolvimento, MSRV, estilo
+- [SECURITY](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/SECURITY.md): versões suportadas, modelo de ameaça, reporte
+- [CODE_OF_CONDUCT](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/CODE_OF_CONDUCT.md): Contributor Covenant 2.1
+- [docs/agent-teams-workflow.md](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/docs/agent-teams-workflow.md): playbook de Agent Teams usado para entregar v0.2.6
+- [docs/decisions/0009-cargo-toml-ownership-in-parallel-tasks.md](https://github.com/daniloaguiarbr/youtube-legend-cli/blob/main/docs/decisions/0009-cargo-toml-ownership-in-parallel-tasks.md): ADR-0009 (serialização de Cargo.toml sob Agent Teams)
+
+## Arquitetura
+- `Cli` derivado de clap com sete flags globais e dez flags específicas de modo
+- `commands::run` de top-level despacha entre extração de URL única e modo batch
+- `ProviderChain` percorre `ProviderA` depois `ProviderB` com throttling de uma requisição por segundo; cai para `ProviderHeadless` quando a feature Cargo `headless` está habilitada
+- `retry::retry_with_backoff` envolve cada chamada upstream com tentativas de 1s/2s/4s e honra `Retry-After` (delta-seconds ou data RFC 2822)
+- `provider::robots` consulta o `robots.txt` upstream antes de qualquer requisição; `Disallow` é reportado como `EX_UNAVAILABLE`
+- `cache` persiste blobs `(video_id, language, format)` sob `~/.cache/youtube-legend-cli/` com TTL de 24h
+- `error::AppError` é um enum `thiserror` mapeado para os exit codes BSD `sysexits.h` (64, 65, 66, 69, 70, 78)
+- `mimalloc` é o alocador global; `secret_endpoints` e `text` são `pub(crate)` apenas
+
+## Módulos
+- [cli](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/cli/index.html): parser de argumentos derivado de clap e a struct Cli (17 flags incl. as 7 globais)
+- [commands](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/commands/index.html): despacho de top-level entre extração de URL única e modo batch
+- [provider](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/provider/index.html): trait Provider, ProviderA, ProviderB, ProviderChain, verificador de robots, ProviderHeadless opcional
+- [parse](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/parse/index.html): extração de texto SRT e parsing de URL/video-id do YouTube
+- [cache](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/cache/index.html): arquivos locais indexados por TTL em ~/.cache/youtube-legend-cli
+- [retry](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/retry/index.html): backoff exponencial e circuit breaker em memória
+- [io](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/io/index.html): helpers de stdin/stdout/TTY
+- [error](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/error/index.html): enum AppError e tabela de exit codes BSD sysexits.h
+- [logging](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/logging/index.html): inicializador do subscriber tracing com precedência de EnvFilter
+- [crypto](https://docs.rs/youtube-legend-cli/latest/youtube_legend_cli/crypto/index.html): AES-256-CBC mais PBKDF2 para assinatura do provider-B
+- text é `pub(crate)` e não é reexportado; alcançável apenas via o crate root
+
+## Binários companheiros
+- `youtube-legend-cli` — o buscador de legendas
+- `snapshot` — sonda ambos os provedores e grava snapshots HTML redacted para detecção de drift (consome `src/secret_endpoints.rs` gitignored)
+
+## Instalação
+- `cargo install youtube-legend-cli` do crates.io
+- `cargo install --path .` de um checkout local
+- Baixe um binário de release para x86_64-unknown-linux-gnu, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl, x86_64-pc-windows-msvc, x86_64-apple-darwin, ou aarch64-apple-darwin
+
+## Contratos de stream
+- stdout é reservado para o corpo da legenda (ou o envelope --json)
+- stderr é reservado para logs, progresso, e mensagens de erro humanas
+- stdin aceita uma única URL, um batch de uma URL por linha, ou entrada via flag --batch
+
+## Opcional
+- Source: https://github.com/daniloaguiarbr/youtube-legend-cli
+- License: dual MIT OR Apache-2.0
+- MSRV: 1.88.0
+- Categories: command-line-utilities (o slug web-programming::scraping foi depreciado no crates.io, veja v0.2.7)
+- 12 jobs de CI incluindo deny, audit, sigilo-gate de public-api, semver-checks, cargo-install, matrix-os

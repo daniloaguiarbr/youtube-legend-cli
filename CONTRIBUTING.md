@@ -1,5 +1,7 @@
 # Contributing to youtube-legend-cli
 
+[English](CONTRIBUTING.md) | [Português Brasileiro](CONTRIBUTING.pt-BR.md)
+
 Thanks for your interest in the project. This document explains how to
 set up a development environment, run the test suite, and submit a
 change.

@@ -1,7 +1,7 @@
 //! Benchmarks for cache key composition and URL validation.
 //!
 //! Run with:
-//!   cargo bench --bench cache_bench
+//!   `cargo bench --bench cache_bench`
 //!
 //! These benchmarks are pure-computation: no I/O, no network.
 //! They cover hot paths in `src/cache.rs::cache_path` and
@@ -10,7 +10,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 /// Measures the cost of composing a cache filename from
-/// (video_id, lang, format) — equivalent to `src/cache.rs::cache_path`.
+/// (`video_id`, lang, format) — equivalent to `src/cache.rs::cache_path`.
 fn bench_cache_key_compose(c: &mut Criterion) {
     let video_id = "dQw4w9WgXcQ";
     let lang = "en";

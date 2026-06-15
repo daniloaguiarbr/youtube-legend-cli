@@ -1,9 +1,34 @@
 # Changelog
+[English](CHANGELOG.md) | [Português Brasileiro](CHANGELOG.pt-BR.md)
 
 All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [0.3.0] - 2026-06-15
+
+### Added
+- ProviderYouTubeDirect (`src/provider/provider_youtube_direct.rs`) — GAP-001 M4 — native YouTube provider that queries the public `ytInitialPlayerResponse` and `captionTracks[].baseUrl` endpoint without relying on third-party services
+- Module `src/provider/youtube/` with:
+  - `player_response.rs` (M1): parser of `ytInitialPlayerResponse` extracted from the watch page via regex
+  - `player_js.rs` and `decipher.rs` (M3): signature decipher ported from `base.js` with XDG cache
+  - `ncode.rs` (M3.5): n-parameter permutation for protected videos
+  - `caption_track.rs`: domain type for caption tracks
+- Srv3/Json3 parser in `src/parse/srv3.rs` (M2): converts native YouTube formats to SRT
+- Binary `youtube-direct-probe` in `src/bin/` for diagnostics
+- Test fixtures: `tests/fixtures/player/base_v123.js`, `tests/fixtures/player/ncode_v456.js`, `tests/fixtures/timedtext/sample_{en.srv3,multiline.srv3,pt.json3}`
+- New errors in `src/error.rs`: `SignatureDecipherFailed`, `PlayerResponseMissing`, `CaptionTrackNotFound`, `TimedtextUpstreamError`
+- 196+ green tests (increment of ~30 tests from GAP-001)
+
+### Changed
+- Refactor: `src/cache.rs` became `src/cache/` (mod operations_cache, player_js_cache) — M3 of GAP-001 introduced XDG cache for player `base.js`
+
+### Fixed
+- META-GAP-B: DoS protection in `player_response.rs` — added `MAX_JSON_DEPTH: usize = 64` guard via byte-level scanner before `serde_json::from_str` (see `gaps.md` META-GAP-B)
+
+### Documentation
+- Skill manifest reescrito: `skill/youtube-legend-cli-en/SKILL.md` (369 linhas) e `skill/youtube-legend-cli-pt/SKILL.md` (366 linhas). 16 lacunas cobertas: provider chain com `provider-headless` 4o opcional, 17 flags adicionadas/refinadas (`--asr`, `--no-fallback`, `--dry-run`, `--batch`, `--format`, `--cache-ttl`, `--no-cache`, `--config`, `--no-progress`, `--yes`, `--user-agent`, `--timeout`, `--verbose`, `--quiet`, `--log-level`, `--log-format`, `--color`), JSON envelope com `meta` block (`provider`, `captions_url`, `deciphered_signature`), binary `youtube-direct-probe` com exemplo NDJSON, binary `snapshot`, 4 novas error variants (`SignatureDecipherFailed`, `PlayerResponseMissing`, `CaptionTrackNotFound`, `TimedtextUpstreamError`) todas exit 70, M1-M5 marcos do GAP-001, modulo `provider::youtube`, `srv3` parser, `player_js_cache` XDG 7-day TTL, 6 cross-compile targets, env vars `YT_LEGEND_CACHE_DIR` e `YT_LEGEND_NO_NETWORK`, feature `headless`, `provider_youtube_direct` struct path, test fixtures, See Also para `CHANGELOG.md` e `docs/MIGRATION.md`. 9/9 auditorias de conformidade PASS.
 
 ## [0.2.8] - 2026-06-14
 
@@ -108,6 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Implementation plan in 8 phases.
 - 4 corpus URLs in `tests/fixtures/corpus.txt`.
 
+[0.3.0]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.9...v0.3.0
 [0.2.8]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.1.0...v0.2.6

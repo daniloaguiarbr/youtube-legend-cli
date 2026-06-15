@@ -1,0 +1,26 @@
+{
+  "wireMagic": "pb3",
+  "events": [
+    {
+      "tStartMs": 0,
+      "dDurationMs": 2500,
+      "segs": [
+        {"utf8": "Olá, mundo."}
+      ]
+    },
+    {
+      "tStartMs": 2500,
+      "dDurationMs": 3000,
+      "segs": [
+        {"utf8": "Esta é uma legenda em português."}
+      ]
+    },
+    {
+      "tStartMs": 5500,
+      "dDurationMs": 2000,
+      "segs": [
+        {"utf8": "Terceira linha com acentuação: ação, café."}
+      ]
+    }
+  ]
+}

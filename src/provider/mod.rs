@@ -10,12 +10,15 @@ pub mod provider_a;
 pub mod provider_b;
 #[cfg(feature = "headless")]
 pub mod provider_headless;
+pub mod provider_youtube_direct;
 pub mod robots;
+pub mod youtube;
 
 pub use provider_a::ProviderA;
 pub use provider_b::ProviderB;
 #[cfg(feature = "headless")]
 pub use provider_headless::ProviderHeadless;
+pub use provider_youtube_direct::ProviderYouTubeDirect;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

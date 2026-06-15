@@ -55,3 +55,17 @@ pub(crate) const USER_AGENT_IDENTITY: &str =
 #[doc(hidden)]
 #[allow(dead_code)]
 pub(crate) const COOKIE_ANTI_BOT_NAME: &str = "dysDedector";
+
+/// Base URL for a YouTube `watch` page. The video id is appended
+/// verbatim (the format already includes the `?`).
+#[doc(hidden)]
+#[allow(dead_code)]
+pub(crate) const YOUTUBE_WATCH_URL_BASE: &str = "https://www.youtube.com/watch?v=";
+
+/// Base URL for a YouTube `player.js` blob. The version segment is
+/// appended verbatim followed by `/player_ias.vflset/en_US/base.js`.
+///
+/// Example: `https://www.youtube.com/s/player/12345678/player_ias.vflset/en_US/base.js`.
+#[doc(hidden)]
+#[allow(dead_code)]
+pub(crate) const YOUTUBE_PLAYER_URL_BASE: &str = "https://www.youtube.com/s/player/";

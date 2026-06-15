@@ -1,5 +1,7 @@
 # Security Policy
 
+[English](SECURITY.md) | [Português Brasileiro](SECURITY.pt-BR.md)
+
 ## Supported versions
 
 | Version | Supported          |

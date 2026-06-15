@@ -105,6 +105,60 @@ pub enum AppError {
     /// Catch-all for internal invariant violations. Indicates a bug.
     #[error("internal error: {0}")]
     Internal(String),
+
+    /// The watch-page HTML did not contain the `ytInitialPlayerResponse`
+    /// JavaScript variable. Surfaces a structurally broken `YouTube` page
+    /// (anti-bot interstitial, age gate, or layout change) without
+    /// silently treating it as a missing subtitle.
+    #[error("player response missing: {0}")]
+    PlayerResponseMissing(String),
+
+    /// The watch-page response body exceeded the configured `DoS` guard
+    /// before `serde_json` was allowed to allocate. The size is
+    /// recorded so operators can tune the limit via configuration.
+    #[error("player response too large: {bytes} bytes exceeds {limit}")]
+    PlayerResponseTooLarge {
+        /// Observed body size in bytes (from `Content-Length` or actual read).
+        bytes: usize,
+        /// Configured cap, in bytes.
+        limit: usize,
+    },
+
+    /// The `playerCaptionsTracklistRenderer` block was present but
+    /// contained zero usable tracks. Differs from a language miss:
+    /// this means the video has no captions at all.
+    #[error("caption track not found")]
+    CaptionTrackNotFound,
+
+    /// The `playabilityStatus.status` field was anything other than
+    /// `OK` (e.g. `LOGIN_REQUIRED`, `ERROR`, `CONTENT_CHECK_REQUIRED`).
+    /// Carries the raw status string for diagnosis.
+    #[error("playability status denied: {0}")]
+    PlayabilityStatusDenied(String),
+
+    /// A BCP-47 language tag from a `CaptionTrack` failed to parse.
+    /// Surfaces a malformed upstream payload without panicking.
+    #[error("language parse error: {0}")]
+    LanguageParseError(String),
+
+    /// The `player.js` decipher routine could not produce a valid
+    /// plaintext signature. This happens when the regex fails to
+    /// locate the operation table, when the operations vector is
+    /// empty after extraction, or when a `&sig=` query parameter is
+    /// shorter than the expected number of operations.
+    #[error("signature decipher failed: {0}")]
+    SignatureDecipherFailed(String),
+
+    /// The `YouTube` `timedtext` endpoint returned an error that the
+    /// provider could not classify (non-JSON body, HTTP status
+    /// outside the known mapping, or body that fails to parse as
+    /// Srv3/JSON3). This variant is distinct from `Http` (transport
+    /// failure before reaching the upstream) and from
+    /// `ProviderUnavailable` (chain exhausted without a structured
+    /// reason): the request reached the upstream but the response
+    /// could not be turned into a `SubtitleInfo`.
+    #[error("timedtext upstream error: {0}")]
+    TimedtextUpstreamError(String),
 }
 
 /// Structured reason why a video has no matching subtitle.
@@ -171,7 +225,14 @@ impl AppError {
             | AppError::Serde(_)
             | AppError::Crypto(_)
             | AppError::SubtitleTooLarge(_)
-            | AppError::Internal(_) => EX_SOFTWARE,
+            | AppError::Internal(_)
+            | AppError::PlayerResponseMissing(_)
+            | AppError::PlayerResponseTooLarge { .. }
+            | AppError::CaptionTrackNotFound
+            | AppError::PlayabilityStatusDenied(_)
+            | AppError::LanguageParseError(_)
+            | AppError::SignatureDecipherFailed(_)
+            | AppError::TimedtextUpstreamError(_) => EX_SOFTWARE,
         }
     }
 
@@ -273,6 +334,73 @@ mod tests {
     }
 
     #[test]
+    fn player_response_missing_exit_code_is_70() {
+        let err = AppError::PlayerResponseMissing("watch?v=abc".to_string());
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn player_response_too_large_exit_code_is_70() {
+        let err = AppError::PlayerResponseTooLarge {
+            bytes: 11_000_000,
+            limit: 10_000_000,
+        };
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn caption_track_not_found_exit_code_is_70() {
+        assert_eq!(AppError::CaptionTrackNotFound.exit_code(), 70);
+    }
+
+    #[test]
+    fn playability_status_denied_exit_code_is_70() {
+        let err = AppError::PlayabilityStatusDenied("LOGIN_REQUIRED".to_string());
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn language_parse_error_exit_code_is_70() {
+        let err = AppError::LanguageParseError("not-bcp47".to_string());
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn signature_decipher_failed_exit_code_is_70() {
+        let err = AppError::SignatureDecipherFailed("op table empty".to_string());
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn timedtext_upstream_error_exit_code_is_70() {
+        let err = AppError::TimedtextUpstreamError("unexpected EOF".to_string());
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn timedtext_upstream_error_display_includes_payload() {
+        let err = AppError::TimedtextUpstreamError("http 503 from timedtext".to_string());
+        let msg = err.to_string();
+        assert!(msg.contains("timedtext"), "missing variant name in {msg}");
+        assert!(
+            msg.contains("http 503 from timedtext"),
+            "missing payload in {msg}"
+        );
+    }
+
+    #[test]
+    fn timedtext_upstream_error_is_distinct_from_http_and_provider_unavailable() {
+        // Compile-time check: TimedtextUpstreamError is a separate
+        // variant from Http, Timeout, and ProviderUnavailable. The
+        // pattern match below must NOT match those alternatives.
+        let err = AppError::TimedtextUpstreamError("bad json".to_string());
+        assert!(!matches!(err, AppError::Http(_)));
+        assert!(!matches!(err, AppError::Timeout(_)));
+        assert!(!matches!(err, AppError::ProviderUnavailable));
+        assert!(!matches!(err, AppError::Serde(_)));
+    }
+
+    #[test]
     fn all_exit_codes_are_in_sysexits_range() {
         let errs = vec![
             AppError::InvalidUsage("x".into()),
@@ -287,6 +415,12 @@ mod tests {
             },
             AppError::Timeout("x".into()),
             AppError::Internal("x".into()),
+            AppError::PlayerResponseMissing("x".into()),
+            AppError::PlayerResponseTooLarge { bytes: 1, limit: 1 },
+            AppError::CaptionTrackNotFound,
+            AppError::PlayabilityStatusDenied("x".into()),
+            AppError::LanguageParseError("x".into()),
+            AppError::TimedtextUpstreamError("x".into()),
         ];
         for e in errs {
             let code = e.exit_code();

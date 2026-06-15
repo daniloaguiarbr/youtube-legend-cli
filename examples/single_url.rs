@@ -1,4 +1,4 @@
-//! Example: download subtitles for a single YouTube URL.
+//! Example: download subtitles for a single `YouTube` URL.
 //!
 //! Run with:
 //!

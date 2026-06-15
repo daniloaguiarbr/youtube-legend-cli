@@ -61,6 +61,10 @@ fn sigint_produces_exit_code_130() {
     sleep(Duration::from_millis(500));
     // Send SIGINT.
     let pid = child.id() as i32;
+    // SAFETY: `pid` is the OS-level child PID returned by
+    // `std::process::Child::id` and is guaranteed to be alive for
+    // the duration of this test; `SIGINT` is a standard POSIX
+    // signal that the child process has installed a handler for.
     let rc = unsafe { libc::kill(pid, libc::SIGINT) };
     assert_eq!(rc, 0, "kill(SIGINT) returned {rc}");
 
@@ -81,6 +85,10 @@ fn sigterm_produces_exit_code_130() {
     let mut child = spawn_cli_with_url("https://youtu.be/dQw4w9WgXcQ");
     sleep(Duration::from_millis(500));
     let pid = child.id() as i32;
+    // SAFETY: `pid` is the OS-level child PID returned by
+    // `std::process::Child::id` and is guaranteed to be alive for
+    // the duration of this test; `SIGTERM` is a standard POSIX
+    // signal handled cooperatively by the CLI's signal watcher.
     let rc = unsafe { libc::kill(pid, libc::SIGTERM) };
     assert_eq!(rc, 0, "kill(SIGTERM) returned {rc}");
 
@@ -103,6 +111,10 @@ fn double_sigint_forces_immediate_exit() {
     let pid = child.id() as i32;
 
     // First signal: cooperative cancellation.
+    // SAFETY: `pid` is the OS-level child PID from
+    // `std::process::Child::id`; `SIGINT` is the standard
+    // cancellation signal whose handler is installed by the CLI's
+    // signal watcher in `main.rs`.
     let rc1 = unsafe { libc::kill(pid, libc::SIGINT) };
     assert_eq!(rc1, 0, "first kill(SIGINT) returned {rc1}");
 
@@ -110,6 +122,10 @@ fn double_sigint_forces_immediate_exit() {
     // state, then fire the second. We expect the watcher to invoke
     // `std::process::exit(130)` without waiting for in-flight HTTP.
     sleep(Duration::from_millis(100));
+    // SAFETY: `pid` is still the live child PID; the second
+    // `SIGINT` is the hard-exit trigger documented in
+    // `main.rs`'s signal watcher, and the child process is
+    // expected to terminate via `std::process::exit(130)`.
     let rc2 = unsafe { libc::kill(pid, libc::SIGINT) };
     assert_eq!(rc2, 0, "second kill(SIGINT) returned {rc2}");
 
