@@ -108,11 +108,23 @@ fn build_provider_chain(cli: &Cli) -> ProviderChain {
                 if let Ok(p) = ProviderB::with_user_agent(&user_agent) {
                     providers.push(Box::new(p));
                 }
+            }
+            // Inject headless in Auto mode when either:
+            //   * --headless is set (operator explicitly asked for the
+            //     headless path, even if --no-fallback was passed), or
+            //   * --no-fallback is NOT set (the default Auto chain ends
+            //     with the headless provider as a last-resort fallback).
+            if cli.headless || !cli.no_fallback {
                 #[cfg(feature = "headless")]
                 {
                     let hl = crate::provider::provider_headless::ProviderHeadless::new()
                         .with_language(language_to_str(cli.lang));
                     providers.push(Box::new(hl));
+                }
+                #[cfg(not(feature = "headless"))]
+                {
+                    // When the binary was not built with --features headless,
+                    // --headless is already rejected in Cli::validate.
                 }
             }
         }

@@ -61,6 +61,34 @@ youtube-legend-cli --json "https://youtu.be/dQw4w9WgXcQ" \
 Discover every flag with `youtube-legend-cli --help`. The full table lives in the project `README.md`.
 
 
+## Headless Mode (v0.3.1+)
+
+### Problem
+- The plain HTTP providers (`youtube-direct`, `provider-a`,
+  `provider-b`) receive HTTP 400 from YouTube and HTTP 429 from
+  Cloudflare when called from a datacenter IP.
+- Downstream operators need a path that drives a real browser so
+  Cloudflare can resolve the JavaScript challenge.
+
+### Correct Pattern
+- Install the binary with the `headless` feature:
+  `cargo install youtube-legend-cli --version 0.3.1 --features headless`
+- Invoke with `--headless` to force the headless fallback:
+  `youtube-legend-cli --headless "https://youtu.be/dQw4w9WgXcQ"`
+- Set `$CHROME=/path/to/chrome` to override the executable lookup
+- `BrowserFetcher` auto-downloads a portable Chromium build to
+  `$XDG_CACHE_HOME/youtube-legend-cli/browser/` when no local Chrome
+  is found
+- `$YT_LEGEND_NO_NETWORK=1` short-circuits the provider without
+  spawning a browser (returns `AppError::ProviderUnavailable`)
+
+### Exit Codes for Headless Failures
+- 66 (EX_NOINPUT) — no matching language track after Cloudflare
+  challenge resolved
+- 69 (EX_UNAVAILABLE) — Chrome/Chromium missing AND auto-download
+  failed, OR `$YT_LEGEND_NO_NETWORK` is set
+- 70 (EX_SOFTWARE) — 60-second navigation timeout exceeded
+
 ## JSON Envelope
 
 ### REQUIRED

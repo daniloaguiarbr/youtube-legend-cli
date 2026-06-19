@@ -75,6 +75,47 @@ impl ProviderHeadless {
         self
     }
 
+    /// Async-only: resolve a Chromium/Chrome executable path, falling
+    /// back to `BrowserFetcher` auto-download when no system browser
+    /// is found. Returns the executable path on success; surfaces a
+    /// structured [`AppError::BrowserNotFound`] on failure.
+    #[tracing::instrument(level = "debug", err)]
+    async fn ensure_chrome() -> AppResult<String> {
+        if let Some(p) = Self::chrome_path() {
+            return Ok(p);
+        }
+        let cache_dir =
+            directories::ProjectDirs::from("com", "youtube-legend-cli", "youtube-legend-cli")
+                .map(|p| p.cache_dir().join("browser"))
+                .unwrap_or_else(|| std::env::temp_dir().join("yt-legend-browser"));
+        if let Err(e) = tokio::fs::create_dir_all(&cache_dir).await {
+            return Err(AppError::BrowserNotFound(format!(
+                "cannot create cache dir {}: {e}",
+                cache_dir.display()
+            )));
+        }
+        let fetcher = chromiumoxide::fetcher::BrowserFetcher::new(
+            chromiumoxide::fetcher::BrowserFetcherOptions::builder()
+                .with_path(&cache_dir)
+                .build()
+                .map_err(|e| AppError::Internal(format!("BrowserFetcherOptions: {e}")))?,
+        );
+        let info = fetcher.fetch().await.map_err(|e| {
+            AppError::BrowserNotFound(format!(
+                "BrowserFetcher download failed: {e}. Set $CHROME or install chromium-browser"
+            ))
+        })?;
+        info.executable_path
+            .to_str()
+            .map(str::to_string)
+            .ok_or_else(|| {
+                AppError::BrowserNotFound(format!(
+                    "BrowserFetcher returned non-utf8 path: {}",
+                    info.executable_path.display()
+                ))
+            })
+    }
+
     /// Resolve a Chromium/Chrome executable: honour `$CHROME`, then try
     /// well-known paths. Returns `None` when no browser is installed.
     fn chrome_path() -> Option<String> {
@@ -96,6 +137,13 @@ impl ProviderHeadless {
             .map(|c| c.to_string())
     }
 }
+
+/// Maximum wall-clock time we wait for the headless browser to
+/// navigate, click the extract button, and run the download JS. The
+/// Cloudflare challenge on the upstream site can take up to 30s to
+/// resolve, so this is a generous ceiling that still surfaces a
+/// structured [`AppError::Timeout`] instead of a silent hang.
+const HEADLESS_NAV_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Percent-encode a URL for the `?u=` query parameter.
 fn urlencode(input: &str) -> String {
@@ -132,6 +180,14 @@ impl Provider for ProviderHeadless {
         language: &str,
         format: Format,
     ) -> AppResult<SubtitleInfo> {
+        // Honour YT_LEGEND_NO_NETWORK: skip the entire pipeline when the
+        // operator explicitly disabled network access. Without this guard,
+        // CI and offline-audit runs would spawn a real browser against
+        // an upstream they cannot reach.
+        if std::env::var("YT_LEGEND_NO_NETWORK").is_ok() {
+            return Err(AppError::ProviderUnavailable);
+        }
+
         let lang = self
             .language
             .clone()
@@ -150,7 +206,7 @@ impl Provider for ProviderHeadless {
             "fetch_subtitle_started"
         );
 
-        let chrome = Self::chrome_path().ok_or(AppError::ProviderUnavailable)?;
+        let chrome = Self::ensure_chrome().await?;
         let config = BrowserConfig::builder()
             .chrome_executable(chrome)
             .arg("--no-sandbox")
@@ -216,11 +272,21 @@ async fn drive_page(
 ) -> AppResult<(String, String)> {
     let video_url = format!("https://www.youtube.com/watch?v={video_id}");
     let page_url = format!("{PROVIDER_B_PRIMARY_PAGE}{}", urlencode(&video_url));
-    let page = browser
-        .new_page(&page_url)
+    let page = tokio::time::timeout(HEADLESS_NAV_TIMEOUT, browser.new_page(&page_url))
         .await
+        .map_err(|_| {
+            AppError::Timeout(format!(
+                "headless new_page exceeded {HEADLESS_NAV_TIMEOUT:?}"
+            ))
+        })?
         .map_err(|_| AppError::ProviderUnavailable)?;
-    let _ = page.wait_for_navigation().await;
+    let _ = tokio::time::timeout(HEADLESS_NAV_TIMEOUT, page.wait_for_navigation())
+        .await
+        .map_err(|_| {
+            AppError::Timeout(format!(
+                "headless wait_for_navigation exceeded {HEADLESS_NAV_TIMEOUT:?}"
+            ))
+        });
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     if let Ok(el) = page.find_element("#getsubtitle").await {

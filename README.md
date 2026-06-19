@@ -262,6 +262,29 @@ x86_64-unknown-linux-gnu host (2026-06-14, release profile, 1000 samples):
 - `url_length_check`: 0 ns/iter (sub-ns, rounded down)
 - `locale_parse_primary_subtag`: ~6 ns/iter
 
+## Headless Mode (v0.3.1+)
+
+When the static HTTP providers are blocked by Cloudflare, install
+the binary with the `headless` feature and pass `--headless`:
+
+    cargo install youtube-legend-cli --version 0.3.1 --features headless
+    youtube-legend-cli --headless "https://youtu.be/dQw4w9WgXcQ"
+
+The CLI spawns a real Chromium instance via `chromiumoxide`,
+navigates to the third-party subtitle site, executes the pagesnown JavaScript to generate the download token, and returns the SRTnbody through the pages same-origin session.
+
+If Chrome/Chromium is not installed locally, the CLI auto-downloads
+a portable build to `$XDG_CACHE_HOME/youtube-legend-cli/browser/`
+via `chromiumoxide::BrowserFetcher`. Set `$CHROME` to override the
+executable path lookup order.
+
+Exit codes for headless failures:
+- 66 (EX_NOINPUT) — Cloudflare challenge resolved but no matching
+  language track was found
+- 69 (EX_UNAVAILABLE) — Chrome/Chromium missing AND auto-download
+  failed, OR `YT_LEGEND_NO_NETWORK=1` was set
+- 70 (EX_SOFTWARE) — timeout exceeded 60s during navigation
+
 ## Documentation
 
 - [docs.rs/youtube-legend-cli](https://docs.rs/youtube-legend-cli) —

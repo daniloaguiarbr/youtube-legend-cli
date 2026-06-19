@@ -1,6 +1,6 @@
 [package]
 name = "youtube-legend-cli"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 default-run = "youtube-legend-cli"
 rust-version = "1.88.0"
@@ -65,7 +65,7 @@ serde_json = { version = "1.0" }
 toml = "0.8"
 regex = { version = "1.10" }
 futures = { version = "0.3", optional = true }
-chromiumoxide = { version = "0.9", optional = true }
+chromiumoxide = { version = "0.9", optional = true, features = ["fetcher", "rustls", "zip8"] }
 is-terminal = { version = "0.4" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 directories = { version = "5.0" }
@@ -150,6 +150,11 @@ path = "tests/integration/signal_handler_stress.rs"
 [[test]]
 name = "cli_probing"
 path = "tests/integration/cli_probing.rs"
+
+[[test]]
+name = "provider_headless_wiremock"
+path = "tests/integration/provider_headless_wiremock.rs"
+required-features = ["headless"]
 
 [[example]]
 name = "single_url"

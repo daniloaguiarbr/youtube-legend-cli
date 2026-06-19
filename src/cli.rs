@@ -368,6 +368,16 @@ pub struct Cli {
         help = "Disable fallbacks in --provider auto (youtube-direct only)"
     )]
     pub no_fallback: bool,
+
+    /// Force the headless browser fallback when the static HTTP
+    /// providers are blocked by Cloudflare. Requires a build with the
+    /// `headless` Cargo feature.
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
+        help = "Force the headless browser fallback (requires --features headless at build time)"
+    )]
+    pub headless: bool,
 }
 
 impl Cli {
@@ -511,6 +521,9 @@ impl Cli {
                     provider.as_str()
                 ));
             }
+        }
+        if self.headless && !cfg!(feature = "headless") {
+            return Err("--headless requires building with `--features headless`".to_string());
         }
         Ok(())
     }

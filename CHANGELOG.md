@@ -6,6 +6,21 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-06-19
+
+### Added
+- CLI flag `--headless` to force the headless browser fallback in `auto` mode
+- `AppError::BrowserNotFound(String)` variant with exit code 69 (EX_UNAVAILABLE) and a human-readable installation hint
+- `BrowserFetcher` auto-download fallback in `provider_headless.rs` when no local Chrome/Chromium is found (downloads to `$XDG_CACHE_HOME/youtube-legend-cli/browser/`)
+- 60s `tokio::time::timeout` wrapping `Browser::new_page` and `page.wait_for_navigation` to surface Cloudflare challenge latency as `AppError::Timeout`
+- `YT_LEGEND_NO_NETWORK` honored by `ProviderHeadless::fetch_subtitle` (returns `ProviderUnavailable` without spawning the browser)
+- `chromiumoxide` features `["fetcher", "rustls", "zip8"]` enabled in `Cargo.toml` so the `BrowserFetcher` API is reachable
+- Integration test `tests/integration/provider_headless_wiremock.rs` covering the env-var short-circuit and builder contract
+
+### Fixed
+- `provider_headless.rs` no longer reports a generic `ProviderUnavailable` when Chrome is missing — surfaces a structured `BrowserNotFound` message with install instructions
+- `Cli::validate()` now rejects `--headless` at parse time when the binary was not built with `--features headless`
+
 ## [0.3.0] - 2026-06-15
 
 ### Added

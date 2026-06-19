@@ -159,6 +159,14 @@ pub enum AppError {
     /// could not be turned into a `SubtitleInfo`.
     #[error("timedtext upstream error: {0}")]
     TimedtextUpstreamError(String),
+
+    /// The headless provider could not locate a Chromium or Chrome
+    /// executable on the system, and the auto-download via
+    /// `BrowserFetcher` failed. Carries a human-readable explanation
+    /// of where the provider looked and what to do next (install via
+    /// `apt`, `brew`, or set `$CHROME`).
+    #[error("chromium/chrome not found: {0}")]
+    BrowserNotFound(String),
 }
 
 /// Structured reason why a video has no matching subtitle.
@@ -218,7 +226,9 @@ impl AppError {
             }
             AppError::InvalidUrl(_) | AppError::UrlParse(_) => EX_DATAERR,
             AppError::NoSubtitle(_) => EX_NOINPUT,
-            AppError::ProviderUnavailable | AppError::RateLimited { .. } => EX_UNAVAILABLE,
+            AppError::ProviderUnavailable
+            | AppError::RateLimited { .. }
+            | AppError::BrowserNotFound(_) => EX_UNAVAILABLE,
             AppError::Timeout(_)
             | AppError::Io(_)
             | AppError::Http(_)
@@ -378,6 +388,24 @@ mod tests {
     }
 
     #[test]
+    fn browser_not_found_exit_code_is_69() {
+        let err = AppError::BrowserNotFound("chrome missing".to_string());
+        assert_eq!(err.exit_code(), sysexits::EX_UNAVAILABLE);
+        assert_eq!(err.exit_code(), 69);
+    }
+
+    #[test]
+    fn browser_not_found_display_includes_context() {
+        let err = AppError::BrowserNotFound("install via apt install chromium".to_string());
+        let msg = err.to_string();
+        assert!(
+            msg.contains("chromium/chrome not found"),
+            "missing prefix: {msg}"
+        );
+        assert!(msg.contains("install via apt"), "missing context: {msg}");
+    }
+
+    #[test]
     fn timedtext_upstream_error_display_includes_payload() {
         let err = AppError::TimedtextUpstreamError("http 503 from timedtext".to_string());
         let msg = err.to_string();
@@ -421,6 +449,7 @@ mod tests {
             AppError::PlayabilityStatusDenied("x".into()),
             AppError::LanguageParseError("x".into()),
             AppError::TimedtextUpstreamError("x".into()),
+            AppError::BrowserNotFound("x".into()),
         ];
         for e in errs {
             let code = e.exit_code();
