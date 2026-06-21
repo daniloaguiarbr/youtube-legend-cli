@@ -75,7 +75,15 @@ fn srv3_text_re() -> &'static Regex {
 pub fn srv3_to_srt(xml: &str) -> AppResult<String> {
     let body = xml.trim();
     if body.is_empty() {
-        return Err(AppError::InvalidInput("empty srv3 body".to_string()));
+        // GAP-E2E-032: the body comes from the YouTube timedtext
+        // endpoint, not from the operator. The previous classification
+        // as InvalidInput (exit 64 EX_USAGE) was semantically wrong —
+        // the operator did not pass a bad value, the upstream returned
+        // an empty body. Reclassify as TimedtextUpstreamError (exit 70
+        // EX_SOFTWARE) so the category matches the cause.
+        return Err(AppError::TimedtextUpstreamError(
+            "empty srv3 body".to_string(),
+        ));
     }
     if body.len() > MAX_BODY_BYTES {
         return Err(AppError::SubtitleTooLarge(body.len()));
@@ -88,12 +96,16 @@ pub fn srv3_to_srt(xml: &str) -> AppResult<String> {
         let dur = cap.get(2).map_or("", |m| m.as_str());
         let text = cap.get(3).map_or("", |m| m.as_str());
 
-        let start_secs: f64 = start
-            .parse()
-            .map_err(|_| AppError::InvalidInput(format!("srv3 start={start:?} not a float")))?;
-        let dur_secs: f64 = dur
-            .parse()
-            .map_err(|_| AppError::InvalidInput(format!("srv3 dur={dur:?} not a float")))?;
+        // GAP-E2E-032: parse failures of start/dur are upstream
+        // issues (the YouTube payload was malformed), not operator
+        // input errors. Reclassify both as TimedtextUpstreamError
+        // (exit 70).
+        let start_secs: f64 = start.parse().map_err(|_| {
+            AppError::TimedtextUpstreamError(format!("srv3 start={start:?} not a float"))
+        })?;
+        let dur_secs: f64 = dur.parse().map_err(|_| {
+            AppError::TimedtextUpstreamError(format!("srv3 dur={dur:?} not a float"))
+        })?;
         let end_secs = start_secs + dur_secs;
 
         index += 1;
@@ -108,7 +120,10 @@ pub fn srv3_to_srt(xml: &str) -> AppResult<String> {
     }
 
     if index == 0 {
-        return Err(AppError::InvalidInput(
+        // GAP-E2E-032: an Srv3 body without any <text> cues is an
+        // upstream structural problem, not operator input. Same
+        // reclassification as the empty-body case above.
+        return Err(AppError::TimedtextUpstreamError(
             "srv3 body has no <text> cues".to_string(),
         ));
     }
@@ -134,7 +149,11 @@ pub fn srv3_to_srt(xml: &str) -> AppResult<String> {
 pub fn json3_to_srt(json: &str) -> AppResult<String> {
     let body = json.trim();
     if body.is_empty() {
-        return Err(AppError::InvalidInput("empty json3 body".to_string()));
+        // GAP-E2E-032: same reclassification as srv3_to_srt — the
+        // body is upstream-originated, not operator input.
+        return Err(AppError::TimedtextUpstreamError(
+            "empty json3 body".to_string(),
+        ));
     }
     if body.len() > MAX_BODY_BYTES {
         return Err(AppError::SubtitleTooLarge(body.len()));
@@ -144,7 +163,11 @@ pub fn json3_to_srt(json: &str) -> AppResult<String> {
     let events = value
         .get("events")
         .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| AppError::InvalidInput("json3 body has no events[] array".to_string()))?;
+        .ok_or_else(|| {
+            // GAP-E2E-032: missing events[] array is an upstream
+            // structural problem, not operator input.
+            AppError::TimedtextUpstreamError("json3 body has no events[] array".to_string())
+        })?;
 
     let mut out = String::new();
     let mut index: usize = 0;
@@ -193,7 +216,9 @@ pub fn json3_to_srt(json: &str) -> AppResult<String> {
     }
 
     if index == 0 {
-        return Err(AppError::InvalidInput(
+        // GAP-E2E-032: zero usable events is an upstream
+        // structural problem, not operator input.
+        return Err(AppError::TimedtextUpstreamError(
             "json3 body has no usable events".to_string(),
         ));
     }
@@ -267,8 +292,91 @@ Line 3</text>
 
     #[test]
     fn rejects_empty_body() {
+        // GAP-E2E-032: empty body comes from upstream, not the
+        // operator — reclassified to TimedtextUpstreamError.
         let err = srv3_to_srt("").unwrap_err();
-        assert!(matches!(err, AppError::InvalidInput(_)));
+        assert!(matches!(err, AppError::TimedtextUpstreamError(_)));
+    }
+
+    // GAP-E2E-032: parse failures of start/dur are upstream-originated
+    // (the YouTube payload was malformed). The previous code
+    // returned InvalidInput (exit 64); the new code returns
+    // TimedtextUpstreamError (exit 70) so the exit code matches the
+    // cause.
+    #[test]
+    fn srv3_invalid_start_returns_upstream_error() {
+        let xml = r#"<?xml version="1.0"?>
+<transcript>
+  <text start="abc" dur="2.0">Hello</text>
+</transcript>"#;
+        let err = srv3_to_srt(xml).unwrap_err();
+        assert!(
+            matches!(err, AppError::TimedtextUpstreamError(_)),
+            "expected TimedtextUpstreamError, got {err:?}"
+        );
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn srv3_invalid_dur_returns_upstream_error() {
+        let xml = r#"<?xml version="1.0"?>
+<transcript>
+  <text start="0.0" dur="xyz">Hello</text>
+</transcript>"#;
+        let err = srv3_to_srt(xml).unwrap_err();
+        assert!(matches!(err, AppError::TimedtextUpstreamError(_)));
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn srv3_empty_body_returns_upstream_error() {
+        let err = srv3_to_srt("").unwrap_err();
+        assert!(matches!(err, AppError::TimedtextUpstreamError(_)));
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn srv3_no_text_cues_returns_upstream_error() {
+        // Srv3 body with valid XML but no <text> cues — the upstream
+        // returned structurally empty content.
+        let xml = r#"<?xml version="1.0"?>
+<transcript>
+  <note>no cues here</note>
+</transcript>"#;
+        let err = srv3_to_srt(xml).unwrap_err();
+        assert!(matches!(err, AppError::TimedtextUpstreamError(_)));
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn json3_empty_body_returns_upstream_error() {
+        let err = json3_to_srt("").unwrap_err();
+        assert!(matches!(err, AppError::TimedtextUpstreamError(_)));
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn json3_no_events_array_returns_upstream_error() {
+        // Valid JSON but no `events` array — the upstream payload
+        // is missing the expected field.
+        let json = r#"{"other": "data"}"#;
+        let err = json3_to_srt(json).unwrap_err();
+        assert!(matches!(err, AppError::TimedtextUpstreamError(_)));
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    #[test]
+    fn json3_no_usable_events_returns_upstream_error() {
+        // Valid JSON with events[] but every event lacks segs or
+        // text. Upstream produced no usable cues.
+        let json = r#"{
+            "events": [
+                {"tStartMs": 0, "dDurationMs": 1000}
+            ]
+        }"#;
+        let err = json3_to_srt(json).unwrap_err();
+        assert!(matches!(err, AppError::TimedtextUpstreamError(_)));
+        assert_eq!(err.exit_code(), 70);
     }
 
     #[test]

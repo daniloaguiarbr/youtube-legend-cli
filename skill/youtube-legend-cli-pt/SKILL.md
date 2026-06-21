@@ -1,20 +1,24 @@
 ---
 name: youtube-legend-cli
-description: Aciona quando o usuário pede para baixar legendas, captions, transcrições, SRT, VTT ou qualquer arquivo de legenda do YouTube a partir de uma URL. Também aciona em menções a substituto do yt-dlp, daniloaguiarbr, youtube-legend-cli, alternativa ao downsub, save subs ou download em lote de legendas a partir de uma lista de URLs do YouTube. Use para invocar a CLI Rust youtube-legend-cli em recuperação de legendas não interativa, programável e envelopada em JSON.
+description: Aciona quando o usuário pede para baixar legendas, captions, transcrições, SRT ou TXT do YouTube a partir de uma URL. Também aciona em menções a substituto do yt-dlp, daniloaguiarbr, youtube-legend-cli, alternativa ao downsub, save subs, raspagem headless de legendas ou download em lote a partir de uma lista de URLs do YouTube. A v0.3.2 usa exclusivamente o provider headless provider-noteey via Chromium controlado por chromiumoxide, com BrowserFetcher que baixa o Chromium automaticamente e patches de stealth anti-fingerprint. Use para invocar a CLI Rust youtube-legend-cli em recuperação de legendas não interativa, programável e envelopada em JSON.
 ---
+
 
 ## Instalação e Primeira Execução
 
 ### OBRIGATÓRIO
-- Toolchain Rust versão 1.88 ou mais recente no host
-- Acesso de rede ao YouTube na TCP/443 para fetches de primeira execução
 - Use `cargo install youtube-legend-cli` em qualquer deploy de produção
-- MSRV é 1.88 stable conforme `Cargo.toml`
+- Toolchain Rust versão 1.88 ou mais recente no host para build a partir do source
+- Acesso de rede ao YouTube na TCP/443 para fetches headless
+- Acesso de rede para o BrowserFetcher baixar o Chromium na primeira execução
+- ESPERE download único de Chromium r1585606 para `~/.cache/youtube-legend-cli/browser/`
+- DEFINA `$CHROME` apontando para um binário Chromium existente para pular o download
 
 ### PROIBIDO
-- Não execute `cargo run --release` em loop apertado em scripts de produção
-- Não compile o binário a partir do source em CI quando o pré-compilado está disponível
-- Não use `cargo install --path .` para instalar fork local sem auditar o diff
+- NUNCA execute `cargo run --release` em loop apertado em scripts de produção
+- NUNCA compile o binário a partir do source em CI quando o pré-compilado está disponível
+- NUNCA use `cargo install --path .` para instalar fork local sem auditar o diff
+- NUNCA assuma que o primeiro fetch é instantâneo quando o Chromium ainda não foi baixado
 
 ### Padrão Correto
 ```bash
@@ -22,23 +26,28 @@ cargo install youtube-legend-cli
 youtube-legend-cli "https://youtu.be/NvZ4VZ5hooY" > out.txt
 ```
 
+### Padrão Correto — Chromium Pré-Instalado
+```bash
+CHROME=/usr/bin/chromium youtube-legend-cli "https://youtu.be/VIDEO" > out.txt
+```
+
+
 ## Referência de Flags da CLI
 
 ### OBRIGATÓRIO
-- Passe `--json` para qualquer consumidor programático
-- `--lang` aceita códigos BCP 47 (`pt-BR`, `en-US`, `es-ES`)
-- `--provider` aceita `auto`, `youtube-direct`, `provider-a`, `provider-b` ou `provider-headless`
-- `--asr` força a trilha auto-gerada, válido apenas com `youtube-direct`
-- `--no-fallback` desabilita a cadeia, válido apenas com `--provider auto`
-- `--format` aceita `txt`, `srt`, `vtt` ou `json`
+- PASSE `--json` para qualquer consumidor programático
+- `--lang` aceita `en`, `pt`, `es`, `fr`, `de`, `it` normalizados para BCP 47
+- `--provider` aceita SOMENTE `auto` (padrão) ou `provider-noteey`
+- `--format` aceita `txt` ou `srt`
 - `--batch` lê URLs do stdin uma por linha
-- `--cache-ttl` aceita horas inteiras positivas para sobrescrever o TTL
+- `--cache-ttl` aceita horas inteiras positivas para sobrescrever o TTL, padrão 24
 - `--no-cache` força leitura fresca ignorando o cache local
 - `--config <PATH>` carrega arquivo TOML de configuração externa
 - `--no-progress` suprime barras de progresso no stderr
+- `--dry-run` valida a entrada sem disparar o fetch headless
 - `--yes` assume sim em prompts não interativos
 - `--user-agent` sobrescreve o cabeçalho User-Agent HTTP
-- `--timeout` aceita segundos inteiros positivos para limite HTTP
+- `--timeout` aceita segundos inteiros positivos para limite HTTP, padrão 30
 - `--verbose` e `--quiet` controlam volume do log no stderr
 - `--log-level` aceita `error`, `warn`, `info`, `debug`, `trace`
 - `--log-format` aceita `text` ou `json`
@@ -46,188 +55,176 @@ youtube-legend-cli "https://youtu.be/NvZ4VZ5hooY" > out.txt
 - Combine `--json` com `--lang` para envelopes de saída localizados
 
 ### PROIBIDO
-- Não hardcode hostnames em scripts
-- Não passe URL do YouTube como argumento posicional duas vezes
-- Não combine `--no-cache` com invalidação explícita de cache
-- Não combine `--asr` com `provider-a` ou `provider-b`
-- Não combine `--no-fallback` com um provedor fixo
+- NUNCA passe `--provider youtube-direct`, `provider-a`, `provider-b` ou `provider-headless` — REMOVIDOS na v0.3.2
+- NUNCA passe `--asr`, `--no-fallback` ou `--headless` — REMOVIDOS na v0.3.2
+- NUNCA hardcode hostnames em scripts
+- NUNCA passe URL do YouTube como argumento posicional duas vezes
+- NUNCA combine `--no-cache` com invalidação explícita de cache
 
 ### Padrão Correto
 ```bash
-youtube-legend-cli --json --lang pt-BR "https://youtu.be/abc" | jaq '.body'
+youtube-legend-cli --json --lang pt "https://youtu.be/abc" | jaq '.body'
 ```
+
+
+## Provider Noteey Headless
+
+### OBRIGATÓRIO
+- O ÚNICO provider na v0.3.2 é `provider-noteey` em `src/provider/provider_noteey.rs`
+- `--provider auto` resolve para `provider-noteey` sem fallback
+- O provider controla Chromium headless via crate `chromiumoxide` 0.9.1
+- O BrowserFetcher baixa Chromium r1585606 para `~/.cache/youtube-legend-cli/browser/`
+- O download usa single-flight para evitar tempestades de fetch concorrentes
+- A env var `$CHROME` sobrescreve a busca do binário e pula o download
+- O módulo `src/provider/stealth.rs` aplica patches anti-fingerprint antes da navegação
+- Os patches de stealth cobrem `navigator.webdriver`, `plugins`, `languages`, vendor WebGL e `chrome.runtime`
+- ESPERE latência maior que provedores HTTP por inicializar um browser real
+
+### PROIBIDO
+- NUNCA referencie `youtube-direct`, `provider-a`, `provider-b` ou `provider-headless` — não existem mais
+- NUNCA invoque `youtube-direct-probe` — o binário foi removido
+- NUNCA persista o Chromium baixado fora do diretório XDG do cache
+- NUNCA desabilite os patches de stealth em produção
+
+### Padrão Correto
+```bash
+youtube-legend-cli --provider provider-noteey --lang pt \
+  "https://youtu.be/VIDEO" > legenda.srt
+```
+
 
 ## Envelope JSON e Schema
 
 ### OBRIGATÓRIO
-- Valide o campo `error` no stdout antes de confiar no body
-- Ramifique no campo `code` que casa com sysexits BSD
-- Leia o campo `retry_after_seconds` quando presente
-- Piping do stdout via `jaq` ou parser JSON equivalente
-- O envelope v0.3.0 adiciona bloco `meta` com `provider`, `captions_url`, `deciphered_signature`
-- O campo `deciphered_signature` é intencionalmente redigido no envelope
-- Schema autoritativo em `docs/schemas/caption-track.schema.json`
+- VALIDE o campo `error` no stdout antes de confiar no body
+- O envelope expõe `provider`, `video_id`, `language`, `format`, `byte_size`, `source_url`, `body`, `error`
+- LEIA o campo `error` para detectar falha antes de consumir `body`
+- Faça piping do stdout via `jaq` ou parser JSON equivalente
+- LEIA o campo `retry_after_seconds` quando presente no envelope de erro
 
 ### PROIBIDO
-- Não faça parse do stdout linha-a-linha como texto de legenda cru
-- Não pule a checagem do envelope
-- Não assuma que o body é sempre uma string
+- NUNCA faça parse do stdout linha-a-linha como texto de legenda cru quando `--json` está ativo
+- NUNCA pule a checagem do envelope
+- NUNCA assuma que o body é sempre uma string preenchida
 
 ### Padrão Correto
 ```bash
 out=$(youtube-legend-cli --json "$url")
-echo "$out" | jaq -e '.error == null' >/dev/null || echo "$out" | jaq '.message'
+echo "$out" | jaq -e '.error == null' >/dev/null || echo "$out" | jaq '.error'
 ```
 
-## Exit Codes e sysexits.h
+
+## Códigos de Saída e sysexits.h
 
 ### OBRIGATÓRIO
 - `0` para sucesso
-- `64` EX_USAGE em argumentos inválidos
-- `65` EX_DATAERR em resposta upstream malformada
-- `66` EX_NOINPUT quando a URL não tem legendas disponíveis
-- `69` EX_UNAVAILABLE quando a cadeia de provedores está esgotada
-- `70` EX_SOFTWARE em falha interna, incluindo erros do provider YouTube
-- `78` EX_CONFIG em erro de configuração
-- `130` SIGINT em interrupção do usuário
+- `2` rejeição do parser clap em flag malformada
+- `64` EX_USAGE em uso inválido (`InvalidUsage`)
+- `65` EX_DATAERR em URL ou entrada inválida (`InvalidUrl`, `InvalidInput`)
+- `66` EX_NOINPUT quando a URL não tem legendas disponíveis (`NoSubtitle`)
+- `69` EX_UNAVAILABLE em `ProviderUnavailable`, `RateLimited`, `BrowserNotFound`, `CaptchaChallenge`
+- `70` EX_SOFTWARE em falha interna (`Internal`, `Timeout`, `Http`, `Io`, `Crypto`, etc)
+- `78` EX_CONFIG em erro de configuração (`ConfigError`)
+- `130` SIGINT ou SIGTERM em interrupção do usuário
 
 ### PROIBIDO
-- Não dependa dos números exatos de exit sem o mapeamento por categoria
-- Não mascare o exit code com fallback `|| true`
+- NUNCA dependa dos números exatos de exit sem o mapeamento por categoria
+- NUNCA mascare o exit code com fallback `|| true`
+- NUNCA trate `69` como falha permanente — Chromium ausente e captcha são recuperáveis
 
 ### Padrão Correto
 ```bash
 youtube-legend-cli "$url" || case $? in
   66) echo "sem legendas" ;;
-  69) echo "upstream fora" ;;
-  70) echo "falha interna do provider" ;;
+  69) echo "provider indisponivel, browser ausente ou captcha" ;;
+  70) echo "falha interna" ;;
+  78) echo "config invalida" ;;
   *) echo "outra falha" ;;
 esac
 ```
 
-## Cadeia de Provedores e Seleção
-
-### OBRIGATÓRIO
-- Ordem padrão: `youtube-direct`, depois `provider_a`, `provider_b`, e `provider_headless` quando a feature `headless` está habilitada
-- O provider `youtube-direct` consulta o endpoint público do YouTube via `ytInitialPlayerResponse` e `captionTracks[].baseUrl`
-- A trait `Provider` é pública e instanciada via `provider::ProviderYouTubeDirect` em `src/provider/provider_youtube_direct.rs`
-- Fixe um provedor específico apenas para teste determinístico
-- Documente qualquer override de provedor no cabeçalho do script
-
-### PROIBIDO
-- Não fixe `provider-a` em scripts de CI porque perde o sinal youtube-direct
-- Não assuma que um único provedor cobre todo o catálogo
-- Não confunda o módulo `src/provider/` com o submódulo `src/provider/youtube/`
-
-### Padrão Correto
-```bash
-# Produção deixa a cadeia fazer fallback automático
-youtube-legend-cli --provider auto "https://youtu.be/VIDEO"
-
-# Debug fixa um provedor e desabilita fallback
-youtube-legend-cli --provider youtube-direct --no-fallback "https://youtu.be/VIDEO"
-```
-
-## Provider YouTube Direct (v0.3.0)
-
-### OBRIGATÓRIO
-- O provider `ProviderYouTubeDirect` vive em `src/provider/provider_youtube_direct.rs`
-- Módulos auxiliares em `src/provider/youtube/` incluem `player_response.rs`, `player_js.rs`, `decipher.rs`, `ncode.rs` e `caption_track.rs`
-- O parser de resposta do player extrai `ytInitialPlayerResponse` da watch page via regex
-- O decipher de signature usa a tabela de operações extraída de `base.js` em cache
-- O decipher do parâmetro n usa a função `ncode` para vídeos protegidos
-- A conversão de Srv3 e Json3 para SRT acontece em `src/parse/srv3.rs`
-- O cache do `base.js` fica em `~/.cache/youtube-legend-cli/player/<versão>.js` com TTL de 7 dias
-- A feature `headless` permanece opcional e gateada em build time
-
-### PROIBIDO
-- Não invoque o provider YouTube direct sem o módulo `src/provider/youtube/`
-- Não persista o `base.js` fora do diretório XDG do cache
-
-### Padrão Correto
-```bash
-youtube-legend-cli --provider youtube-direct --asr --lang pt-BR \
-  "https://youtu.be/VIDEO" > legenda.srt
-```
 
 ## Comportamento de Cache
 
 ### OBRIGATÓRIO
 - TTL padrão de 24 horas em disco em `~/.cache/youtube-legend-cli/`
-- O cache do player JavaScript vive em `~/.cache/youtube-legend-cli/player/`
-- Use `--no-cache` para fetches frescos em pipelines de auditoria
-- Use `--cache-ttl` para sobrescrever o TTL em horas inteiras
+- O Chromium baixado vive em `~/.cache/youtube-legend-cli/browser/`
+- USE `--no-cache` para fetches frescos em pipelines de auditoria
+- USE `--cache-ttl` para sobrescrever o TTL em horas inteiras
 - Invalide uma entrada removendo o diretório dela
-- O cache do player usa single-flight para evitar tempestades de download
+- O download do browser usa single-flight para evitar tempestades de download
 
 ### PROIBIDO
-- Não hardcode paths em `/tmp` para armazenamento de cache
-- Não delete o diretório inteiro de cache em scripts de produção
-- Não redirecione o cache para fora do XDG
+- NUNCA hardcode paths em `/tmp` para armazenamento de cache
+- NUNCA delete o diretório inteiro de cache em scripts de produção
+- NUNCA redirecione o cache para fora do XDG
 
 ### Padrão Correto
 ```bash
-# Invalida uma entrada
+# Invalida uma entrada de legenda
 rm -rf ~/.cache/youtube-legend-cli/<autor>/subtitles/<video>/
 
-# Sobrescreve o TTL para um batch de longa duração
+# Sobrescreve o TTL para um batch de longa duracao
 youtube-legend-cli --cache-ttl 168 "https://youtu.be/VIDEO"
 ```
+
 
 ## Retry e Rate Limiting
 
 ### OBRIGATÓRIO
-- Honre o header `Retry-After` em respostas HTTP 429
-- Leia o campo `retry_after_seconds` do envelope JSON
-- Pare de tentar após a janela de delay fornecida pelo envelope
+- LEIA o campo `retry_after_seconds` do envelope JSON
+- PARE de tentar após a janela de delay fornecida pelo envelope
 - O fallback interno é 60 segundos com teto de 300 segundos
-- O throttle de uma requisição por segundo é por cadeia, não por provedor
+- TRATE `CaptchaChallenge` como rate-limit suave e aguarde antes de retentar
 
 ### PROIBIDO
-- Não rode loops de retry client-side sem backoff
-- Não martele o mesmo provedor após resposta de rate-limit
-- Não fixe `--timeout` abaixo de 5 segundos
+- NUNCA rode loops de retry client-side sem backoff
+- NUNCA martele o provider após resposta de rate-limit
+- NUNCA fixe `--timeout` abaixo de 5 segundos
 
 ### Padrão Correto
 ```bash
 # erros rate-limited carregam retry_after_seconds no envelope JSON
-sleep "$(echo "$out" | jaq '.retry_after_seconds')"
+sleep "$(echo "$out" | jaq '.retry_after_seconds // 60')"
 ```
+
 
 ## Contratos de Streaming
 
 ### OBRIGATÓRIO
-- stdout carrega texto de legenda, SRT, VTT ou envelope JSON apenas
+- stdout carrega texto de legenda, SRT ou envelope JSON apenas
 - stderr carrega logs, progresso e diagnósticos
-- Descarte o stderr antes de pipar o stdout em `jaq`
+- DESCARTE o stderr antes de pipar o stdout em `jaq`
 
 ### PROIBIDO
-- Não faça parse de logs do stderr como se fossem o body
-- Não redirecione stderr para arquivo e depois releia como JSON
+- NUNCA faça parse de logs do stderr como se fossem o body
+- NUNCA redirecione stderr para arquivo e depois releia como JSON
 
 ### Padrão Correto
 ```bash
 youtube-legend-cli --json "$url" 2>/dev/null | jaq '.body'
 ```
 
+
 ## Tratamento de Erros
 
 ### OBRIGATÓRIO
-- Ramifique na categoria `AppError` do envelope
-- Mapeie categorias para política de retry na camada de orquestração
-- Leia `docs/AGENTS.pt-BR.md` para a tabela completa de categorias
+- RAMIFIQUE na categoria `AppError` do envelope
+- MAPEIE categorias para política de retry na camada de orquestração
 - O enum `AppError` é `#[non_exhaustive]`; trate cada variante como categoria
-- Use o helper `reason()` para extrair `NoSubtitleReason` quando o erro for `NoSubtitle`
+- USE o helper `reason()` para extrair `NoSubtitleReason` quando o erro for `NoSubtitle`
+- TRATE `BrowserNotFound` definindo `$CHROME` ou permitindo o download do BrowserFetcher
 
 ### PROIBIDO
-- Não entre em panic na lógica de pipeline em exit não-zero
-- Não assuma uma única categoria de erro para toda a cadeia de provedores
-- Não transforme o erro em string para casar por substring
+- NUNCA entre em panic na lógica de pipeline em exit não-zero
+- NUNCA transforme o erro em string para casar por substring
 
 ### Padrão Correto
 ```rust
 match err {
     AppError::NoSubtitle(reason) => log::warn!("sem legenda: {reason}"),
+    AppError::BrowserNotFound(msg) => log::error!("Chromium ausente: {msg}; defina $CHROME ou habilite o BrowserFetcher"),
+    AppError::CaptchaChallenge { .. } => log::warn!("captcha detectado; aguarde antes de retentar"),
     AppError::RateLimited { retry_after_secs } => {
         tokio::time::sleep(Duration::from_secs(retry_after_secs.unwrap_or(60))).await;
     }
@@ -235,118 +232,68 @@ match err {
 }
 ```
 
+
 ## Variáveis de Ambiente
 
 ### OBRIGATÓRIO
+- `$CHROME` aponta para um binário Chromium existente e pula o download do BrowserFetcher
+- `$YT_LEGEND_NO_NETWORK` presente, com qualquer valor, curto-circuita o provider e retorna `ProviderUnavailable`
 - `YT_LOG_LEVEL` vence `--log-level`
 - `YT_LOG_FORMAT` vence `--log-format`
 - `YT_LEGEND_CACHE_DIR` sobrescreve o diretório de cache XDG padrão
-- `YT_LEGEND_NO_NETWORK` desabilita todo tráfego de rede para modo offline
-- Use a família `YT_*` para qualquer override de configuração
+- USE a família `YT_*` para qualquer override de configuração
 
 ### PROIBIDO
-- Não defina `RUST_LOG` diretamente
-- Não passe flags de log e env vars que conflitem
-- Não confie em `RUST_LOG` para vencer as env vars `YT_*`
+- NUNCA defina `RUST_LOG` diretamente
+- NUNCA passe flags de log e env vars que conflitem
+- NUNCA confie em `RUST_LOG` para vencer as env vars `YT_*`
 
 ### Padrão Correto
 ```bash
 YT_LOG_LEVEL=debug YT_LOG_FORMAT=json youtube-legend-cli "$url"
 ```
 
-## Capacidades do Provider YouTube Direct (v0.3.0)
+### Padrão Correto — Modo Offline
+```bash
+YT_LEGEND_NO_NETWORK=1 youtube-legend-cli "$url"
+# Retorna ProviderUnavailable com exit 69
+```
+
+
+## Download em Lote
 
 ### OBRIGATÓRIO
-- Passe `--provider youtube-direct` para forçar o provider nativo
-- Confie em legendas auto-geradas via `--asr` sem fallback para third-party
-- Receba SRT canônico do YouTube convertido de Srv3 e Json3 localmente
-- Diagnostique com `youtube-direct-probe <video-id>` quando o decipher falhar
-- Aplique filtros em `captionTracks` por `languageCode` e `kind`
+- USE `--batch` para ler URLs do stdin uma por linha
+- COMBINE `--batch` com `--json` para envelopes processáveis por linha
+- ENCAPSULE o lote com `timeout` em segundos para evitar travamento
+- ESPERE reuso da instância de browser entre URLs do mesmo lote
 
 ### PROIBIDO
-- Não invoque `youtube-direct-probe` em pipelines de produção
-- Não assuma que a trilha manual existe antes de tentar a auto-gerada
+- NUNCA dispare um processo separado por URL quando `--batch` resolve
+- NUNCA pipe stderr para o parser JSON no modo lote
 
 ### Padrão Correto
 ```bash
-youtube-direct-probe <video-id> | jaq -r '.signature_status'
+printf '%s\n' \
+  "https://youtu.be/aaa" \
+  "https://youtu.be/bbb" \
+  | youtube-legend-cli --batch --json --lang pt 2>/dev/null \
+  | jaq -r 'select(.error == null) | .body'
 ```
 
-## Binário de Diagnóstico `youtube-direct-probe`
-
-### OBRIGATÓRIO
-- O binário vive em `src/bin/youtube-direct-probe.rs` e é compilado junto com a CLI
-- O probe carrega o `base.js` em cache e roda o decipher em uma signature sintética
-- O probe imprime um objeto JSON por linha com `signature_status`, `player_js_version`, `cache_hit` e `decipher_error` opcional
-- O probe respeita `YT_LEGEND_NO_NETWORK` para diagnóstico offline
-
-### PROIBIDO
-- Não invoque o probe em loops de produção
-- Não parseie a saída como se fosse o body de legenda
-
-### Padrão Correto
-```bash
-youtube-direct-probe dQw4w9WgXcQ
-```
-
-## Comportamento de Erros (v0.3.0)
-
-### OBRIGATÓRIO
-- `SignatureDecipherFailed(String)` retorna exit 70 `EX_SOFTWARE`
-- `PlayerResponseMissing(String)` retorna exit 70
-- `CaptionTrackNotFound` retorna exit 70
-- `TimedtextUpstreamError(String)` retorna exit 70
-- As quatro variantes residem em `src/error.rs` e são aditivas ao enum `AppError`
-- Clientes da biblioteca continuam funcionando sem recompilação
-
-### PROIBIDO
-- Não trate as novas variantes como `EX_UNAVAILABLE`
-- Não confunda `SignatureDecipherFailed` com rate limiting
-
-### Padrão Correto
-```rust
-match err {
-    AppError::SignatureDecipherFailed(s) => log::error!("decipher falhou: {s}"),
-    AppError::PlayerResponseMissing(s) => log::error!("player response ausente: {s}"),
-    AppError::CaptionTrackNotFound => log::warn!("sem trilha de legenda"),
-    AppError::TimedtextUpstreamError(s) => log::error!("upstream timedtext falhou: {s}"),
-    _ => return Err(err),
-}
-```
-
-## Marcos do GAP-001 (M1 a M5 + M3.5)
-
-### OBRIGATÓRIO
-- M1 implementa o parser de `ytInitialPlayerResponse` em `src/provider/youtube/player_response.rs`
-- M2 implementa o fetcher de timedtext sem signature usando `baseUrl` direto
-- M3 implementa o signature decipher portado de `base.js` com cache XDG
-- M3.5 implementa o decipher do parâmetro n para vídeos protegidos em `src/provider/youtube/ncode.rs`
-- M4 integra o provider na cadeia e adiciona as flags `--provider`, `--asr` e `--no-fallback`
-- M5 adiciona fixtures de teste em `tests/fixtures/player/` e `tests/fixtures/timedtext/`
-- O gate de CI em `.github/workflows/youtube-direct.yml` exige os 6 alvos de cross-compile verdes
-
-### PROIBIDO
-- Não pule o gate do CI YouTube direct antes de merge
-- Não altere o parser de Srv3 sem atualizar os snapshots de teste
-
-### Padrão Correto
-```bash
-# Roda os testes do provider YouTube direct
-cargo test --test youtube_direct -- --ignored
-```
 
 ## Alvos de Cross-Compile
 
 ### OBRIGATÓRIO
-- 6 alvos via job `cross-compile` em `ci.yml`
 - `x86_64-unknown-linux-gnu` é o alvo primário de desenvolvimento
 - `x86_64-unknown-linux-musl` e `aarch64-unknown-linux-musl` suportam contêineres estáticos
 - `x86_64-pc-windows-msvc` cobre Windows nativo
-- `x86_64-apple-darwin` e `aarch64-apple-darwin` rodam com `continue-on-error: true` por exigirem osxcross
+- `x86_64-apple-darwin` e `aarch64-apple-darwin` cobrem macOS
+- VERIFIQUE que o Chromium correspondente ao alvo está disponível em runtime
 
 ### PROIBIDO
-- Não publique um release sem todos os 6 alvos passando no CI
-- Não confie em `cargo build` local como substituto do gate de cross-compile
+- NUNCA publique um release sem os alvos passando no CI
+- NUNCA confie em `cargo build` local como substituto do gate de cross-compile
 
 ### Padrão Correto
 ```bash
@@ -354,13 +301,11 @@ cargo install cross --locked
 cross build --target x86_64-unknown-linux-musl --release
 ```
 
+
 ## Veja Também
 - [CHANGELOG.md](../../CHANGELOG.md) — histórico completo de releases
-- [docs/AGENTS.pt-BR.md](../../docs/AGENTS.pt-BR.md) — guia para agentes com tabela de variantes
-- [docs/MIGRATION.pt-BR.md](../../docs/MIGRATION.pt-BR.md) — migração de v0.2.x para v0.3.x
+- [docs/AGENTS.pt-BR.md](../../docs/AGENTS.pt-BR.md) — guia para agentes com tabela de variantes de erro
 - [docs/COOKBOOK.pt-BR.md](../../docs/COOKBOOK.pt-BR.md) — receitas práticas para shell, CI e Python
 - [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) — diagrama do pipeline e mapa de módulos
 - [docs/CROSS_PLATFORM.pt-BR.md](../../docs/CROSS_PLATFORM.pt-BR.md) — receitas de cross-compile e paths XDG
-- [docs/TESTING.pt-BR.md](../../docs/TESTING.pt-BR.md) — suíte de testes de integração
-- [docs/schemas/caption-track.schema.json](../../docs/schemas/caption-track.schema.json) — schema JSON autoritativo
 - [gaps.md](../../gaps.md) — registro vivo de problemas conhecidos

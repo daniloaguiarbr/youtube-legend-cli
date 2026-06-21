@@ -1,23 +1,21 @@
-//! TTL-keyed local file cache for fetched subtitles, plus
-//! versioned caches for the `YouTube` `player.js` blob and the
-//! operations table extracted from it.
+//! TTL-keyed local file cache for fetched subtitles.
 //!
-//! The original `cache_path` / `read_cache` / `write_cache` helpers
-//! (moved from the legacy `src/cache.rs` file) keep their public
-//! signatures so callers outside this module are unaffected.
+//! The `cache_path` / `read_cache` / `write_cache` helpers keep their
+//! public signatures so callers outside this module are unaffected.
 //!
-//! New in v0.3.0:
-//!
-//! - \[`crate::cache::player_js_cache`\] — versioned on-disk TTL cache for the
-//!   `player.js` blob, with single-flight concurrency control.
-//! - \[`crate::cache::operations_cache`\] — process-local map of parsed
-//!   `JsOperation` tables keyed by player version.
+//! GAP-AUD-2026-051: subtitle bodies are cached alongside a sidecar
+//! `*.hint` file that records the [`crate::provider::SubtitleFormat`]
+//! discriminator (`srt` or `noteey-transcript`). The cache hit path
+//! in `commands::extract` consults the sidecar to pick the right
+//! parser — without it, noteey-style bodies cached on disk would be
+//! re-parsed as `Srt`, leaking `MM:SS` timestamps into the output.
 
 #![allow(dead_code)]
 
 use crate::error::{AppError, AppResult};
+use crate::provider::SubtitleFormat;
 use directories::ProjectDirs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_TTL_HOURS: u64 = 24;
@@ -140,6 +138,36 @@ pub async fn read_cache(path: &PathBuf, ttl: Duration) -> AppResult<Option<Vec<u
     Ok(Some(bytes))
 }
 
+/// GAP-AUD-2026-051: read a cached entry plus its format hint. The
+/// hint lives in a sidecar file `<path>.hint` next to the cached
+/// body. When the sidecar is missing or unreadable the function
+/// conservatively reports [`SubtitleFormat::Srt`] — operators upgrading
+/// from a v0.3.0 cache (which never wrote the sidecar) will continue to
+/// receive SRT bodies until the entry expires and is rewritten.
+///
+/// # Errors
+///
+/// - [`AppError::Io`] on any filesystem or metadata read failure.
+#[tracing::instrument(level = "debug", err, skip(path), fields(path = %path.display(), ttl_secs = ttl.as_secs()))]
+pub async fn read_cache_with_hint(
+    path: &PathBuf,
+    ttl: Duration,
+) -> AppResult<Option<(Vec<u8>, SubtitleFormat)>> {
+    let bytes = match read_cache(path, ttl).await? {
+        Some(b) => b,
+        None => return Ok(None),
+    };
+    let hint_path = hint_path_for(path);
+    let hint = match tokio::fs::read(&hint_path).await {
+        Ok(s) => match std::str::from_utf8(&s) {
+            Ok(s) => parse_hint(s).unwrap_or(SubtitleFormat::Srt),
+            Err(_) => SubtitleFormat::Srt,
+        },
+        Err(_) => SubtitleFormat::Srt,
+    };
+    Ok(Some((bytes, hint)))
+}
+
 /// Persist `content` to `path`, creating the parent directory if needed.
 ///
 /// # Errors
@@ -156,6 +184,49 @@ pub async fn write_cache(path: &PathBuf, content: &[u8]) -> AppResult<()> {
         .await
         .map_err(AppError::Io)?;
     Ok(())
+}
+
+/// GAP-AUD-2026-051: persist `content` plus its `format_hint` sidecar.
+/// The hint is stored as a UTF-8 string (`srt` or `noteey-transcript`)
+/// in a sibling file `<path>.hint`. The next read via
+/// [`read_cache_with_hint`] recovers the discriminator so the cache
+/// hit path can pick the right parser.
+///
+/// # Errors
+///
+/// - [`AppError::Io`] on any filesystem write failure.
+#[tracing::instrument(level = "debug", err, skip(path, content, format_hint), fields(path = %path.display(), bytes = content.len()))]
+pub async fn write_cache_with_hint(
+    path: &PathBuf,
+    content: &[u8],
+    format_hint: SubtitleFormat,
+) -> AppResult<()> {
+    write_cache(path, content).await?;
+    let hint_path = hint_path_for(path);
+    let hint_text = format_hint.as_str();
+    if let Some(parent) = hint_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(AppError::Io)?;
+    }
+    tokio::fs::write(&hint_path, hint_text.as_bytes())
+        .await
+        .map_err(AppError::Io)?;
+    Ok(())
+}
+
+fn hint_path_for(path: &Path) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(".hint");
+    PathBuf::from(s)
+}
+
+fn parse_hint(s: &str) -> Option<SubtitleFormat> {
+    match s.trim() {
+        "srt" => Some(SubtitleFormat::Srt),
+        "noteey-transcript" => Some(SubtitleFormat::NoteeyTranscript),
+        _ => None,
+    }
 }
 
 /// Remove a cache entry if it exists. A missing entry is not an error.
@@ -177,8 +248,6 @@ pub fn default_ttl() -> Duration {
     Duration::from_secs(DEFAULT_TTL_HOURS * 3600)
 }
 
-pub mod operations_cache;
-pub mod player_js_cache;
 
 #[cfg(test)]
 mod tests {

@@ -23,6 +23,8 @@ pub mod sysexits {
     pub const EX_UNAVAILABLE: u8 = 69;
     /// Internal software error (BSD sysexits.h: `EX_SOFTWARE`).
     pub const EX_SOFTWARE: u8 = 70;
+    /// Configuration error (BSD sysexits.h: `EX_CONFIG`).
+    pub const EX_CONFIG: u8 = 78;
 }
 
 /// Top-level error type returned by every public API in this crate.
@@ -167,6 +169,33 @@ pub enum AppError {
     /// `apt`, `brew`, or set `$CHROME`).
     #[error("chromium/chrome not found: {0}")]
     BrowserNotFound(String),
+
+    /// A user-supplied configuration file (loaded via `--config`) could
+    /// not be read, contained invalid TOML, or carried an unknown key.
+    /// This variant is distinct from [`AppError::InvalidUsage`]: a
+    /// config parse failure is a server-side / file-side error
+    /// (sysexits `EX_CONFIG = 78`), not a CLI argument mistake
+    /// (sysexits `EX_USAGE = 64`). Operators that branch on the BSD
+    /// category need the signal that `--config /tmp/bad.toml` failed
+    /// because the file is bad, not because the CLI was misused.
+    #[error("config error: {0}")]
+    Config(String),
+
+    /// The upstream provider answered with a captcha challenge
+    /// (Cloudflare `cf-turnstile` or `h-captcha`). This is structurally
+    /// different from a transient [`AppError::ProviderUnavailable`]:
+    /// captcha requires human interaction and cannot resolve by
+    /// retrying. The exit code is `EX_UNAVAILABLE = 69` for
+    /// backward compatibility with scripts that branch on exit code
+    /// alone; the structured variant lets programmatic callers
+    /// distinguish via [`AppError::is_captcha`].
+    #[error("captcha challenge from {provider} ({kind}): human interaction required")]
+    CaptchaChallenge {
+        /// Short identifier of the provider that raised the challenge.
+        provider: &'static str,
+        /// Captcha implementation detected (`"cf-turnstile"` or `"h-captcha"`).
+        kind: &'static str,
+    },
 }
 
 /// Structured reason why a video has no matching subtitle.
@@ -207,6 +236,7 @@ impl NoSubtitleReason {
     /// does not correspond to any of the structured cases.
     pub fn from_status(status: u16) -> Option<Self> {
         match status {
+            400 => Some(Self::NotPublished),
             403 => Some(Self::PrivateOrAgeRestricted),
             404 => Some(Self::NotFound),
             410 => Some(Self::Gone),
@@ -228,7 +258,9 @@ impl AppError {
             AppError::NoSubtitle(_) => EX_NOINPUT,
             AppError::ProviderUnavailable
             | AppError::RateLimited { .. }
-            | AppError::BrowserNotFound(_) => EX_UNAVAILABLE,
+            | AppError::BrowserNotFound(_)
+            | AppError::CaptchaChallenge { .. } => EX_UNAVAILABLE,
+            AppError::Config(_) => EX_CONFIG,
             AppError::Timeout(_)
             | AppError::Io(_)
             | AppError::Http(_)
@@ -255,6 +287,14 @@ impl AppError {
         } else {
             NoSubtitleReason::NotPublished
         }
+    }
+
+    /// `true` if this is a captcha challenge (Cloudflare `cf-turnstile`
+    /// or `h-captcha`). Captcha requires human interaction and cannot
+    /// resolve by retrying. Distinct from [`AppError::ProviderUnavailable`]
+    /// which signals a transient upstream failure.
+    pub fn is_captcha(&self) -> bool {
+        matches!(self, AppError::CaptchaChallenge { .. })
     }
 }
 
@@ -450,6 +490,11 @@ mod tests {
             AppError::LanguageParseError("x".into()),
             AppError::TimedtextUpstreamError("x".into()),
             AppError::BrowserNotFound("x".into()),
+            AppError::Config("x".into()),
+            AppError::CaptchaChallenge {
+                provider: "x",
+                kind: "x",
+            },
         ];
         for e in errs {
             let code = e.exit_code();
@@ -458,6 +503,23 @@ mod tests {
                 "exit code {code} out of sysexits range 64-78 for {e:?}"
             );
         }
+    }
+
+    #[test]
+    fn config_error_exit_code_is_78() {
+        assert_eq!(
+            AppError::Config("bad".to_string()).exit_code(),
+            sysexits::EX_CONFIG
+        );
+        assert_eq!(AppError::Config("bad".to_string()).exit_code(), 78);
+    }
+
+    #[test]
+    fn config_error_display_includes_message() {
+        let err = AppError::Config("could not read config file /tmp/bad.toml".to_string());
+        let msg = err.to_string();
+        assert!(msg.contains("config error"), "missing prefix: {msg}");
+        assert!(msg.contains("/tmp/bad.toml"), "missing path context: {msg}");
     }
 
     #[test]
@@ -480,5 +542,60 @@ mod tests {
         assert!(NoSubtitleReason::UnavailableForLegalReasons
             .to_string()
             .contains("451"));
+    }
+
+    // GAP-E2E-026: HTTP 400 from the YouTube timedtext endpoint
+    // means "no captions exist for this video". The previous
+    // implementation only mapped 403/404/410/451, causing 400 to fall
+    // through to ProviderUnavailable (exit 69). Adding 400 to
+    // from_status unifies the behaviour across all providers so the
+    // operator sees NoSubtitle (exit 66) consistently.
+    #[test]
+    fn no_subtitle_reason_from_status_maps_400_to_not_published() {
+        assert_eq!(
+            NoSubtitleReason::from_status(400),
+            Some(NoSubtitleReason::NotPublished)
+        );
+    }
+
+    // GAP-E2E-030: CaptchaChallenge is a new variant for upstream
+    // captcha responses (Cloudflare cf-turnstile, h-captcha). Exit
+    // code 69 is shared with ProviderUnavailable for backward
+    // compatibility; the structured variant allows programmatic
+    // distinction via is_captcha().
+    #[test]
+    fn captcha_challenge_exit_code_is_69() {
+        let err = AppError::CaptchaChallenge {
+            provider: "provider-b",
+            kind: "cf-turnstile",
+        };
+        assert_eq!(err.exit_code(), sysexits::EX_UNAVAILABLE);
+        assert_eq!(err.exit_code(), 69);
+    }
+
+    #[test]
+    fn captcha_challenge_display_includes_provider_and_kind() {
+        let err = AppError::CaptchaChallenge {
+            provider: "provider-b",
+            kind: "h-captcha",
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("captcha"), "missing variant name in {msg}");
+        assert!(msg.contains("provider-b"), "missing provider in {msg}");
+        assert!(msg.contains("h-captcha"), "missing kind in {msg}");
+    }
+
+    #[test]
+    fn captcha_challenge_is_captcha_helper_returns_true() {
+        let err = AppError::CaptchaChallenge {
+            provider: "provider-b",
+            kind: "cf-turnstile",
+        };
+        assert!(err.is_captcha());
+    }
+
+    #[test]
+    fn provider_unavailable_is_captcha_helper_returns_false() {
+        assert!(!AppError::ProviderUnavailable.is_captcha());
     }
 }

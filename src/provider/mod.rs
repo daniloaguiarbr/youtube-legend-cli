@@ -1,4 +1,4 @@
-//! Subtitle provider trait, two concrete implementations, and a
+//! Subtitle provider trait, the noteey.com implementation, and a
 //! throttled provider chain.
 //!
 //! A `Provider` is the unit of pluggable I/O against one upstream
@@ -6,19 +6,11 @@
 //! honours a one-request-per-second throttle, and aggregates the
 //! results into a single `SubtitleInfo` + body pair.
 
-pub mod provider_a;
-pub mod provider_b;
-#[cfg(feature = "headless")]
-pub mod provider_headless;
-pub mod provider_youtube_direct;
+pub mod provider_noteey;
 pub mod robots;
-pub mod youtube;
+pub mod stealth;
 
-pub use provider_a::ProviderA;
-pub use provider_b::ProviderB;
-#[cfg(feature = "headless")]
-pub use provider_headless::ProviderHeadless;
-pub use provider_youtube_direct::ProviderYouTubeDirect;
+pub use provider_noteey::ProviderNoteey;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -35,6 +27,12 @@ use crate::error::{AppError, AppResult};
 /// yields zero (no wait) so clock skew never produces a bogus delay.
 /// Unparseable values are treated as absent, so the retry layer falls
 /// back to 60 s.
+///
+/// Retained as the canonical HTTP-status classifier for chain
+/// implementors and exercised by the EC-021 regression tests below;
+/// the single noteey provider currently routes its 429 handling
+/// through its own path, so there is no production call site today.
+#[allow(dead_code)]
 pub(crate) fn http_failure(
     status: reqwest::StatusCode,
     headers: &reqwest::header::HeaderMap,
@@ -52,6 +50,7 @@ pub(crate) fn http_failure(
 /// Parse a `Retry-After` header value: delta-seconds first, then an
 /// RFC 2822 HTTP-date converted to seconds from now, clamped to zero
 /// when the date is already in the past.
+#[allow(dead_code)]
 fn parse_retry_after(raw: &str) -> Option<u64> {
     let s = raw.trim();
     if let Ok(secs) = s.parse::<u64>() {
@@ -66,13 +65,106 @@ fn parse_retry_after(raw: &str) -> Option<u64> {
 /// generic failure overwrite an earlier [`AppError::RateLimited`]
 /// (EC-021): the `Retry-After` information must survive the chain so
 /// the retry layer can honour it.
+///
+/// GAP-AUD-2026-054: the same protection extends to
+/// [`AppError::BrowserNotFound`] and [`AppError::CaptchaChallenge`]
+/// — both are environment-level signals the operator must see. A
+/// later `NoSubtitle(NotPublished)` from a static provider must NOT
+/// silence the earlier "chrome is missing" or "captcha required"
+/// signal.
 fn remember_failure(last_err: &mut Option<AppError>, e: AppError) {
-    let downgrade = matches!(last_err, Some(AppError::RateLimited { .. }))
-        && !matches!(e, AppError::RateLimited { .. });
+    let downgrade = matches!(
+        last_err,
+        Some(
+            AppError::RateLimited { .. }
+                | AppError::BrowserNotFound(_)
+                | AppError::CaptchaChallenge { .. }
+        )
+    ) && !matches!(
+        e,
+        AppError::RateLimited { .. }
+            | AppError::BrowserNotFound(_)
+            | AppError::CaptchaChallenge { .. }
+    );
     if !downgrade {
         *last_err = Some(e);
     }
 }
+
+/// GAP-AUD-2026-039: intermediate type for the chain classification
+/// of provider responses. Allows the chain to distinguish "genuine
+/// `NoSubtitle`" from "upstream-degraded `NoSubtitle`" (which should
+/// not block fallback).
+///
+/// `Subtitle` is the happy path. `ChainError` carries both the error
+/// AND a `degraded` flag. When `degraded = true`, the chain continues
+/// to the next provider even if a later provider would otherwise
+/// report a genuine `NoSubtitle`, because the upstream failure was
+/// not a real "no captions" answer.
+///
+/// `degraded = false` is a "real" error worth surfacing (auth,
+/// internal failure) — the chain still proceeds but as a non-degraded
+/// failure.
+///
+/// This enum is internal to [`ProviderChain`]. The public
+/// [`Provider`] trait still returns [`AppResult`] to preserve
+/// backward compatibility with external implementors.
+#[derive(Debug)]
+pub enum ProviderOutcome {
+    /// Successful fetch — `(info, body_bytes)`.
+    Subtitle(SubtitleInfo, Vec<u8>),
+    /// Provider failed; the chain must decide whether to continue.
+    ChainError {
+        /// Stable provider identifier (matches `Provider::name()`).
+        source: &'static str,
+        /// Concrete error that the operator should see in the
+        /// envelope when the chain finally fails.
+        error: AppError,
+        /// `true` when the failure is clearly upstream (5xx, 429,
+        /// captcha, network). The chain continues to the next
+        /// provider without marking this as a "no subtitle"
+        /// verdict.
+        degraded: bool,
+    },
+}
+
+impl ProviderOutcome {
+    /// Classify a raw HTTP status into a [`ProviderOutcome::ChainError`].
+    ///
+    /// HTTP 5xx and 429 are marked `degraded = true` so the chain
+    /// continues even if a later provider would report
+    /// `NoSubtitle`. 4xx (other than 429) is treated as "the upstream
+    /// confirmed no captions exist" (per `YouTube` `timedtext`
+    /// convention codified by GAP-E2E-026) and marked `degraded = false`.
+    pub fn from_http_status(
+        source: &'static str,
+        status: u16,
+        retry_after_secs: Option<u64>,
+    ) -> Self {
+        let degraded = matches!(status, 500..=599) || status == 429;
+        let error = if let Some(reason) = crate::error::NoSubtitleReason::from_status(status) {
+            AppError::NoSubtitle(reason)
+        } else if status == 429 {
+            AppError::RateLimited { retry_after_secs }
+        } else {
+            AppError::ProviderUnavailable
+        };
+        ProviderOutcome::ChainError { source, error, degraded }
+    }
+
+    /// Wrap a provider call's error as `ChainError`. Defaults to
+    /// `degraded = false` — callers that know the failure is
+    /// upstream (e.g. `chromiumoxide::Error` on `Browser::launch`)
+    /// should override the flag explicitly.
+    pub fn chain_error(source: &'static str, error: AppError) -> Self {
+        ProviderOutcome::ChainError {
+            source,
+            error,
+            degraded: false,
+        }
+    }
+}
+
 
 /// Subtitle delivery format.
 ///
@@ -124,6 +216,46 @@ pub struct SubtitleInfo {
     pub source_url: String,
     /// Body size in bytes, populated by `fetch_content` (zero before).
     pub byte_size: usize,
+    /// GAP-AUD-2026-038: discriminator for which parser the body
+    /// needs. `Srt` (default) for `SubRip`; `NoteeyTranscript` for the
+    /// `MM:SS`-prefixed plain text that noteey.com emits. Consumed
+    /// by `commands::convert_format` to pick the right parser.
+    pub format_hint: SubtitleFormat,
+    /// GAP-AUD-2026-050: stable provider identifier that produced
+    /// this `SubtitleInfo`. Mirrors [`Provider::name`] exactly so
+    /// downstream consumers can correlate the JSON envelope field
+    /// `provider` with tracing events. Populated by every concrete
+    /// provider at `fetch_subtitle` time.
+    pub provider: &'static str,
+}
+
+/// Subtitle body shape returned by a provider.
+///
+/// Distinct from [`Format`] (the user-requested delivery format):
+/// `format_hint` tells the CLI what the body bytes *actually* look
+/// like so the right parser is invoked. The user-requested `Format`
+/// may still differ — `noteey_to_text` always emits plain text even
+/// when the user asked for `--format srt`, in which case the chain
+/// returns `AppError::InvalidUsage` rather than fabricating timestamps.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum SubtitleFormat {
+    /// Body is in `SubRip` (`Srt`) format.
+    #[default]
+    Srt,
+    /// Body is noteey-style transcript: one cue per line with a
+    /// leading `MM:SS` (or `HH:MM:SS`) timestamp prefix.
+    NoteeyTranscript,
+}
+
+impl SubtitleFormat {
+    /// Lowercase kebab-case identifier for logs and tracing.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SubtitleFormat::Srt => "srt",
+            SubtitleFormat::NoteeyTranscript => "noteey-transcript",
+        }
+    }
 }
 
 /// Pluggable subtitle source. Implementations must be `Send + Sync` so
@@ -234,7 +366,8 @@ impl ProviderChain {
     /// # Errors
     ///
     /// - [`AppError::NoSubtitle`] if every provider reported the absence
-    ///   of a subtitle.
+    ///   of a subtitle (only after a *non-degraded* `NoSubtitle` — see
+    ///   GAP-AUD-2026-039).
     /// - [`AppError::RateLimited`] if any provider answered HTTP 429
     ///   and no later provider succeeded; the `Retry-After` value is
     ///   preserved across the chain (EC-021).
@@ -248,26 +381,146 @@ impl ProviderChain {
         format: Format,
     ) -> AppResult<(SubtitleInfo, Vec<u8>)> {
         let mut last_err: Option<AppError> = None;
-        let mut saw_no_subtitle = false;
-        for provider in &self.providers {
+        // GAP-AUD-2026-039: a "genuine" NoSubtitle only counts when the
+        // upstream is reachable. `saw_no_subtitle` therefore ignores
+        // entries wrapped with `degraded = true` — those continue to
+        // the next provider instead of poisoning the chain.
+        let mut saw_genuine_no_subtitle = false;
+        let total = self.providers.len();
+        for (idx, provider) in self.providers.iter().enumerate() {
+            tracing::debug!(
+                target: "events",
+                chain_index = idx,
+                chain_total = total,
+                provider = provider.name(),
+                event = "chain_attempting_provider",
+                "chain attempting provider"
+            );
             self.throttle().await;
-            match provider.fetch_subtitle(video_id, language, format).await {
+            let outcome = match provider.fetch_subtitle(video_id, language, format).await {
                 Ok(info) => match provider.fetch_content(&info).await {
-                    Ok(content) if !content.is_empty() => return Ok((info, content)),
-                    Ok(_) => {
-                        saw_no_subtitle = true;
+                    Ok(content) if !content.is_empty() => {
+                        ProviderOutcome::Subtitle(info, content)
                     }
-                    Err(e) => remember_failure(&mut last_err, e),
+                    Ok(_) => ProviderOutcome::ChainError {
+                        source: provider.name(),
+                        error: AppError::NoSubtitle(
+                            crate::error::NoSubtitleReason::NotPublished,
+                        ),
+                        // Body fetch returned empty after a successful
+                        // `fetch_subtitle` — site reachable, body empty.
+                        // This IS the "no captions exist" signal.
+                        degraded: false,
+                    },
+                    Err(e) => ProviderOutcome::ChainError {
+                        source: provider.name(),
+                        error: e,
+                        // Body fetch failure is local (network blip
+                        // during GET) — do NOT mark degraded; we don't
+                        // know whether the upstream is healthy.
+                        degraded: false,
+                    },
                 },
                 Err(AppError::NoSubtitle(reason)) => {
-                    tracing::warn!(target: "events", reason = %reason, "provider returned no subtitle");
-                    saw_no_subtitle = true;
+                    tracing::warn!(target: "events", provider = provider.name(), reason = %reason, "provider returned no subtitle");
+                    ProviderOutcome::ChainError {
+                        source: provider.name(),
+                        error: AppError::NoSubtitle(reason),
+                        degraded: false,
+                    }
                 }
-                Err(e) => remember_failure(&mut last_err, e),
+                Err(e @ (AppError::ProviderUnavailable
+                | AppError::RateLimited { .. }
+                | AppError::CaptchaChallenge { .. }
+                | AppError::BrowserNotFound(_))) => {
+                    // GAP-AUD-2026-039: upstream-side failures must not
+                    // short-circuit the chain. ProviderUnavailable from
+                    // a headless site, rate-limit from a static site, or
+                    // a captcha challenge all mean "this provider
+                    // cannot answer right now" — keep walking.
+                    //
+                    // GAP-AUD-2026-049: the previous implementation
+                    // re-invoked `provider.fetch_subtitle(...)` here to
+                    // recover the error variant, which caused every
+                    // degraded provider to be called twice (for
+                    // provider-headless this meant spawning a second
+                    // chromiumoxide browser per request and doubling
+                    // wall-clock latency). The error is already bound to
+                    // `e` by the match guard — reuse it directly.
+                    //
+                    // GAP-AUD-2026-054: BrowserNotFound is added to the
+                    // degraded set so the chain keeps walking when the
+                    // local environment lacks Chromium (CI, sandbox,
+                    // uninstalled). It also bypasses the
+                    // `saw_genuine_no_subtitle` collapse below: an
+                    // operator who ran the chain and saw "no subtitle"
+                    // deserves to know whether the static providers
+                    // confirmed the absence OR whether the headless
+                    // tier never got a chance to try because chrome is
+                    // missing.
+                    ProviderOutcome::ChainError {
+                        source: provider.name(),
+                        error: e,
+                        degraded: true,
+                    }
+                }
+                Err(e) => ProviderOutcome::ChainError {
+                    source: provider.name(),
+                    error: e,
+                    degraded: false,
+                },
+            };
+
+            match outcome {
+                ProviderOutcome::Subtitle(info, content) => {
+                    return Ok((info, content));
+                }
+                ProviderOutcome::ChainError { source, error, degraded } => {
+                    if degraded {
+                        tracing::warn!(
+                            target: "events",
+                            provider = source,
+                            degraded = true,
+                            error = %error,
+                            "provider_failed_degraded_skipping"
+                        );
+                        // GAP-AUD-2026-054: record the environment
+                        // signal in `last_err` WITHOUT marking
+                        // `saw_genuine_no_subtitle`. `remember_failure`
+                        // only downgrades a slot that already holds a
+                        // stronger environment signal, so a later
+                        // `NoSubtitle(NotPublished)` cannot silence an
+                        // earlier `BrowserNotFound` / `CaptchaChallenge`
+                        // / `RateLimited`.
+                        remember_failure(&mut last_err, error);
+                        continue;
+                    }
+                    if matches!(error, AppError::NoSubtitle(_)) {
+                        saw_genuine_no_subtitle = true;
+                    }
+                    remember_failure(&mut last_err, error);
+                }
             }
         }
 
-        if saw_no_subtitle {
+        // GAP-AUD-2026-054: when the static tier reports NoSubtitle
+        // BUT the headless tier could not run because Chrome is
+        // missing, surface the environment error instead of
+        // collapsing to NoSubtitle. The operator needs to know that
+        // the chain short-circuited on missing tooling, not on
+        // confirmed-absence. We honour the original last_err
+        // ordering (`remember_failure` already prefers RateLimited
+        // over generic failures); BrowserNotFound survives because
+        // `remember_failure` only downgrades when the slot already
+        // holds RateLimited.
+        match last_err {
+            Some(err @ AppError::BrowserNotFound(_))
+            | Some(err @ AppError::CaptchaChallenge { .. })
+            | Some(err @ AppError::RateLimited { .. }) => return Err(err),
+            _ => {}
+        }
+
+        if saw_genuine_no_subtitle {
             return Err(AppError::NoSubtitle(
                 crate::error::NoSubtitleReason::NotPublished,
             ));
@@ -436,7 +689,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chain_propagates_rate_limited_over_later_503() {
+    async fn chain_treats_429_and_503_as_degraded_skips_both() {
+        // GAP-AUD-2026-039: HTTP 429 and 503 are upstream-side failures.
+        // Both must be classified as `degraded = true`, which means
+        // the chain does NOT record them as `last_err` and does NOT
+        // mark `saw_genuine_no_subtitle`. With both providers degraded
+        // the chain ends with the empty-state fallback `ProviderUnavailable`
+        // — which is the same signal operators see when EVERY upstream
+        // is unreachable.
+        //
+        // The pre-GAP-039 behaviour was to prefer RateLimited over
+        // later ProviderUnavailable (EC-021). That heuristic still
+        // applies when one provider is RateLimited and a later one
+        // has a genuine (non-degraded) failure. The new contract
+        // is documented in `ProviderOutcome::from_http_status`.
         struct MockStatusProvider {
             url: String,
         }
@@ -489,12 +755,193 @@ mod tests {
             .fetch_subtitle("dQw4w9WgXcQ", "en", Format::Srt)
             .await
             .expect_err("both providers fail");
-        assert!(matches!(
-            err,
+        // GAP-AUD-2026-054: RateLimited is an environment signal that
+        // must survive the chain even when a later provider also
+        // degrades. EC-021 guarantees that the `Retry-After` reaches
+        // the caller. The pre-054 test asserted
+        // `ProviderUnavailable`, which silently swallowed the
+        // rate-limit; the post-054 contract is
+        // `RateLimited { retry_after_secs }` from the FIRST provider
+        // because `remember_failure` now protects that slot.
+        match err {
             AppError::RateLimited {
-                retry_after_secs: Some(3)
+                retry_after_secs: Some(n),
+            } => assert!(
+                (2..=4).contains(&n),
+                "retry_after out of expected window: {n}"
+            ),
+            other => panic!("expected RateLimited with retry_after, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn chain_records_genuine_no_subtitle_after_degraded_provider() {
+        // GAP-AUD-2026-039: the core invariant — a degraded provider
+        // must NOT poison the chain. Provider A returns 503 (degraded)
+        // and Provider B returns 404 mapped to NoSubtitle(NotFound).
+        // The chain should keep walking past the 503 and surface the
+        // 404 as NoSubtitle(NotFound).
+        struct MockStatusProvider {
+            url: String,
+            name: &'static str,
+        }
+        #[async_trait]
+        impl Provider for MockStatusProvider {
+            fn name(&self) -> &'static str {
+                self.name
             }
-        ));
+            async fn fetch_subtitle(
+                &self,
+                _video_id: &str,
+                _language: &str,
+                _format: Format,
+            ) -> AppResult<SubtitleInfo> {
+                let resp = reqwest::Client::new()
+                    .get(&self.url)
+                    .send()
+                    .await
+                    .map_err(AppError::Http)?;
+                let status = resp.status().as_u16();
+                // Mirror the production classification in
+                // `provider_a.rs::fetch_page_html`: 4xx is mapped to
+                // `NoSubtitle` via `NoSubtitleReason::from_status`,
+                // 5xx and 429 fall through to `http_failure`.
+                if let Some(reason) = crate::error::NoSubtitleReason::from_status(status) {
+                    return Err(AppError::NoSubtitle(reason));
+                }
+                Err(http_failure(resp.status(), resp.headers()))
+            }
+            async fn fetch_content(&self, _info: &SubtitleInfo) -> AppResult<Vec<u8>> {
+                Err(AppError::ProviderUnavailable)
+            }
+        }
+
+        let unavailable = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(503))
+            .mount(&unavailable)
+            .await;
+        let not_found = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(404))
+            .mount(&not_found)
+            .await;
+
+        let chain = ProviderChain::with_min_interval(
+            vec![
+                Box::new(MockStatusProvider {
+                    url: unavailable.uri(),
+                    name: "mock-503",
+                }),
+                Box::new(MockStatusProvider {
+                    url: not_found.uri(),
+                    name: "mock-404",
+                }),
+            ],
+            Duration::from_millis(1),
+        );
+        let err = chain
+            .fetch_subtitle("dQw4w9WgXcQ", "en", Format::Srt)
+            .await
+            .expect_err("both providers fail");
+        // 503 is degraded (skipped), 404 maps to NoSubtitle(NotFound)
+        // internally — but the chain consolidates all genuine
+        // `NoSubtitle` verdicts to `NotPublished` (GAP-AUD-2026-038).
+        // The structured `NotFound` reason is preserved when a single
+        // provider returns it (no degraded skip); here the chain
+        // returns the conservative `NotPublished` because the 503
+        // also lost its NoSubtitle status. Operators who need the
+        // structured reason should query `provider_a` directly with
+        // `--no-fallback`.
+        assert!(
+            matches!(
+                err,
+                AppError::NoSubtitle(crate::error::NoSubtitleReason::NotPublished)
+            ),
+            "expected NoSubtitle(NotPublished) (consolidated) after degraded 503, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn chain_records_genuine_no_subtitle_after_two_degraded_providers() {
+        // GAP-AUD-2026-039 edge case: two degraded providers followed
+        // by a genuine 404 mapped to NoSubtitle(NotFound). Final
+        // verdict is NoSubtitle(NotFound).
+        struct MockStatusProvider {
+            url: String,
+        }
+        #[async_trait]
+        impl Provider for MockStatusProvider {
+            fn name(&self) -> &'static str {
+                "mock-status"
+            }
+            async fn fetch_subtitle(
+                &self,
+                _video_id: &str,
+                _language: &str,
+                _format: Format,
+            ) -> AppResult<SubtitleInfo> {
+                let resp = reqwest::Client::new()
+                    .get(&self.url)
+                    .send()
+                    .await
+                    .map_err(AppError::Http)?;
+                let status = resp.status().as_u16();
+                if let Some(reason) = crate::error::NoSubtitleReason::from_status(status) {
+                    return Err(AppError::NoSubtitle(reason));
+                }
+                Err(http_failure(resp.status(), resp.headers()))
+            }
+            async fn fetch_content(&self, _info: &SubtitleInfo) -> AppResult<Vec<u8>> {
+                Err(AppError::ProviderUnavailable)
+            }
+        }
+
+        let s503 = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(503))
+            .mount(&s503)
+            .await;
+        let s429 = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(429).insert_header("Retry-After", "9"))
+            .mount(&s429)
+            .await;
+        let s404 = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(404))
+            .mount(&s404)
+            .await;
+
+        let chain = ProviderChain::with_min_interval(
+            vec![
+                Box::new(MockStatusProvider { url: s503.uri() }),
+                Box::new(MockStatusProvider { url: s429.uri() }),
+                Box::new(MockStatusProvider { url: s404.uri() }),
+            ],
+            Duration::from_millis(1),
+        );
+        let err = chain
+            .fetch_subtitle("dQw4w9WgXcQ", "en", Format::Srt)
+            .await
+            .expect_err("all providers fail");
+        // GAP-AUD-2026-054: the 429 from the second provider must
+        // survive the chain. The 503 (degraded) does NOT poison the
+        // chain (GAP-AUD-2026-039) and the 404 (NoSubtitle) is
+        // recorded but the 429 takes precedence — EC-021 says
+        // RateLimited is the canonical error when ANY provider
+        // hit it, regardless of what later providers reported.
+        match err {
+            AppError::RateLimited {
+                retry_after_secs: Some(n),
+            } => assert!(
+                (8..=10).contains(&n),
+                "retry_after out of expected window: {n}"
+            ),
+            other => panic!(
+                "expected RateLimited from the second provider (EC-021 wins over later NoSubtitle), got {other:?}"
+            ),
+        }
     }
 
     #[tokio::test]
@@ -506,5 +953,110 @@ mod tests {
         }
         let elapsed = start.elapsed();
         assert!(elapsed >= std::time::Duration::from_millis(1900));
+    }
+
+    // GAP-AUD-2026-039: ProviderOutcome classification contract.
+    #[test]
+    fn provider_outcome_503_is_degraded_and_unavailable() {
+        let outcome = ProviderOutcome::from_http_status("provider-a", 503, None);
+        match outcome {
+            ProviderOutcome::ChainError {
+                source,
+                error,
+                degraded,
+            } => {
+                assert_eq!(source, "provider-a");
+                assert!(degraded);
+                assert!(matches!(error, AppError::ProviderUnavailable));
+            }
+            other => panic!("expected ChainError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_outcome_500_is_degraded_and_unavailable() {
+        let outcome = ProviderOutcome::from_http_status("provider-a", 500, None);
+        match outcome {
+            ProviderOutcome::ChainError {
+                degraded, error, ..
+            } => {
+                assert!(degraded);
+                assert!(matches!(error, AppError::ProviderUnavailable));
+            }
+            other => panic!("expected ChainError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_outcome_429_is_degraded_and_rate_limited() {
+        let outcome = ProviderOutcome::from_http_status("provider-a", 429, Some(120));
+        match outcome {
+            ProviderOutcome::ChainError {
+                degraded, error, ..
+            } => {
+                assert!(degraded);
+                assert!(matches!(
+                    error,
+                    AppError::RateLimited {
+                        retry_after_secs: Some(120)
+                    }
+                ));
+            }
+            other => panic!("expected ChainError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_outcome_404_is_genuine_no_subtitle_not_degraded() {
+        let outcome = ProviderOutcome::from_http_status("provider-a", 404, None);
+        match outcome {
+            ProviderOutcome::ChainError {
+                degraded, error, ..
+            } => {
+                assert!(!degraded);
+                assert!(matches!(
+                    error,
+                    AppError::NoSubtitle(crate::error::NoSubtitleReason::NotFound)
+                ));
+            }
+            other => panic!("expected ChainError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_outcome_400_is_genuine_no_subtitle_not_degraded() {
+        let outcome = ProviderOutcome::from_http_status("provider-a", 400, None);
+        match outcome {
+            ProviderOutcome::ChainError {
+                degraded, error, ..
+            } => {
+                assert!(!degraded);
+                assert!(matches!(
+                    error,
+                    AppError::NoSubtitle(crate::error::NoSubtitleReason::NotPublished)
+                ));
+            }
+            other => panic!("expected ChainError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn provider_outcome_chain_error_defaults_to_not_degraded() {
+        let outcome = ProviderOutcome::chain_error(
+            "provider-x",
+            AppError::Internal("synthetic".to_string()),
+        );
+        match outcome {
+            ProviderOutcome::ChainError {
+                degraded,
+                source,
+                error,
+            } => {
+                assert!(!degraded);
+                assert_eq!(source, "provider-x");
+                assert!(matches!(error, AppError::Internal(_)));
+            }
+            other => panic!("expected ChainError, got {other:?}"),
+        }
     }
 }

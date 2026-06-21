@@ -1,6 +1,6 @@
 [package]
 name = "youtube-legend-cli"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 default-run = "youtube-legend-cli"
 rust-version = "1.88.0"
@@ -44,14 +44,6 @@ msrv-policy = "highest"
 
 [dependencies]
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "gzip", "cookies", "json", "form"] }
-scraper = { version = "0.27", default-features = false }
-aes = { version = "0.8", features = ["zeroize"] }
-cbc = { version = "0.1", features = ["zeroize"] }
-pbkdf2 = { version = "0.12", features = ["simple"] }
-sha1 = { version = "0.10" }
-base64 = { version = "0.22" }
-hex = { version = "0.4" }
-rand = { version = "0.10", features = ["sys_rng"] }
 url = { version = "2.5" }
 clap = { version = "4.5", features = ["derive", "wrap_help", "cargo", "unicode"] }
 tokio = { version = "1.40", features = ["full"] }
@@ -64,29 +56,15 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 toml = "0.8"
 regex = { version = "1.10" }
-futures = { version = "0.3", optional = true }
-chromiumoxide = { version = "0.9", optional = true, features = ["fetcher", "rustls", "zip8"] }
+futures = { version = "0.3" }
+chromiumoxide = { version = "0.9", features = ["fetcher", "rustls", "zip8"] }
 is-terminal = { version = "0.4" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 directories = { version = "5.0" }
-hmac = { version = "0.12" }
 async-trait = "0.1"
 unicode-normalization = "0.1"
 robotstxt = "0.3"
 
-
-[features]
-default = []
-# External  wrapper crate — used at docs.rs build via
-#  to enable  on
-# stable Rust without manual  nightlies.
-# This decouples the nightly feature gate from consumer builds.
-
-# Optional headless-browser fallback provider. Requires a local
-# Chromium/Chrome install at runtime. Drives the upstream site's own
-# JavaScript to download subtitles when the plain HTTP providers are
-# blocked by Cloudflare or browser-gated endpoints.
-headless = ["dep:chromiumoxide", "dep:futures"]
 
 [dev-dependencies]
 tokio = { version = "1.40", features = ["full", "test-util"] }
@@ -115,13 +93,6 @@ debug = true
 name = "youtube-legend-cli"
 path = "src/main.rs"
 
-[[bin]]
-name = "snapshot"
-path = "src/bin/snapshot.rs"
-
-[[bin]]
-name = "youtube-direct-probe"
-path = "src/bin/youtube-direct-probe.rs"
 
 [[test]]
 name = "corpus"
@@ -136,14 +107,6 @@ name = "offline_cache"
 path = "tests/integration/offline_cache.rs"
 
 [[test]]
-name = "provider_a_wiremock"
-path = "tests/integration/provider_a_wiremock.rs"
-
-[[test]]
-name = "provider_b_wiremock"
-path = "tests/integration/provider_b_wiremock.rs"
-
-[[test]]
 name = "signal_handler_stress"
 path = "tests/integration/signal_handler_stress.rs"
 
@@ -152,9 +115,8 @@ name = "cli_probing"
 path = "tests/integration/cli_probing.rs"
 
 [[test]]
-name = "provider_headless_wiremock"
-path = "tests/integration/provider_headless_wiremock.rs"
-required-features = ["headless"]
+name = "provider_noteey_wiremock"
+path = "tests/integration/provider_noteey_wiremock.rs"
 
 [[example]]
 name = "single_url"

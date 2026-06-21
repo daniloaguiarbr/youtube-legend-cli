@@ -49,7 +49,7 @@ where
             }
             Err(AppError::RateLimited { retry_after_secs }) => {
                 let wait = retry_after_secs.unwrap_or(60).min(300);
-                tracing::warn!(
+                tracing::debug!(
                     target: "events",
                     event = "retry",
                     attempt = attempt + 1,
@@ -60,7 +60,7 @@ where
             }
             Err(_) => {
                 if let Some(delay) = delays.get(attempt as usize) {
-                    tracing::warn!(
+                    tracing::debug!(
                         target: "events",
                         event = "retry",
                         attempt = attempt + 1,

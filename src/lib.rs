@@ -36,8 +36,6 @@
 //!   table.
 //! - [`logging`] — initialiser for the global `tracing` subscriber.
 //! - `text` — Unicode NFC normalisation.
-//! - [`crypto`] — AES-256-CBC + PBKDF2 used by provider-B's request
-//!   signing path.
 //!
 //! # Stream contracts
 //!
@@ -73,10 +71,6 @@ pub mod cli;
 /// Top-level command dispatch: extract one URL, or batch many.
 pub mod commands;
 
-/// AES-256-CBC + PBKDF2 token encryption used by provider-B's request
-/// signing path. Do not use these primitives for new code outside the
-/// provider-B compatibility layer.
-pub mod crypto;
 
 /// Error types and process exit-code table.
 pub mod error;
@@ -97,9 +91,8 @@ pub mod provider;
 /// Exponential-backoff retry helper and in-memory circuit breaker.
 pub mod retry;
 
-/// Internal constants for provider hosts, paths, cookies, and user
-/// agent. Gitignored; never published. Consumed by `provider_a`,
-/// `provider_b`, and the `snapshot` binary.
+/// Internal constants for provider hosts and paths. Gitignored;
+/// never published.
 pub(crate) mod secret_endpoints;
 
 /// Unicode NFC normalisation.

@@ -4,7 +4,7 @@
 //! the start of `main`, validate it with [`Cli::validate`], then dispatch
 //! the rest of the program.
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use clap::{ArgAction, Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -122,24 +122,16 @@ pub enum ColorArg {
 
 /// Provider selection strategy for the subtitle-fetch chain.
 ///
-/// The `auto` mode (default) walks `ProviderYouTubeDirect` first and
-/// then falls back to the third-party providers. Explicit values
-/// (`youtube-direct`, `provider-a`, `provider-b`, `provider-headless`)
-/// pin the chain to a single provider, restoring the v0.2.9
-/// behaviour for the named provider.
+/// The CLI now uses exclusively the noteey.com provider. Both `auto`
+/// (default) and `provider-noteey` resolve to `ProviderNoteey`; the
+/// `--provider` flag is retained only for backward compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ProviderChoice {
-    /// Walk the full chain (YouTube-direct first, then fallbacks).
+    /// Resolve to the noteey.com provider.
     Auto,
-    /// Only the direct `YouTube` provider.
-    YoutubeDirect,
-    /// Only the third-party `provider_a`.
-    ProviderA,
-    /// Only the third-party `provider_b`.
-    ProviderB,
-    /// Only the headless browser provider (feature-gated).
-    ProviderHeadless,
+    /// The noteey.com provider.
+    ProviderNoteey,
 }
 
 impl ProviderChoice {
@@ -147,10 +139,7 @@ impl ProviderChoice {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Auto => "auto",
-            Self::YoutubeDirect => "youtube-direct",
-            Self::ProviderA => "provider-a",
-            Self::ProviderB => "provider-b",
-            Self::ProviderHeadless => "provider-headless",
+            Self::ProviderNoteey => "provider-noteey",
         }
     }
 }
@@ -334,50 +323,17 @@ pub struct Cli {
     )]
     pub no_cache: bool,
 
-    /// Provider selection strategy. `auto` (default) tries the
-    /// direct `YouTube` provider first, then falls back to
-    /// `provider-a`, `provider-b`, and (under the `headless` feature)
-    /// `provider-headless`. Explicit values pin the chain to a
-    /// single provider.
+    /// Provider selection. Retained for backward compatibility; both
+    /// `auto` (default) and `provider-noteey` resolve to the
+    /// noteey.com provider.
     #[arg(
         long,
         value_name = "PROVIDER",
-        help = "Provider selection: auto, youtube-direct, provider-a, provider-b, provider-headless",
+        help = "Provider selection: auto, provider-noteey",
         default_value = "auto",
         value_enum
     )]
     pub provider: Option<ProviderChoice>,
-
-    /// Prefer auto-generated (ASR) captions when multiple tracks are
-    /// available in the requested language. Only the `youtube-direct`
-    /// provider honours this flag; combining it with another
-    /// provider is rejected at validation time.
-    #[arg(
-        long,
-        action = ArgAction::SetTrue,
-        help = "Prefer auto-generated (ASR) captions; only valid with youtube-direct"
-    )]
-    pub asr: bool,
-
-    /// When `--provider auto` is set, disable the fallback chain so
-    /// only `youtube-direct` is consulted. Has no effect when an
-    /// explicit provider is named.
-    #[arg(
-        long,
-        action = ArgAction::SetTrue,
-        help = "Disable fallbacks in --provider auto (youtube-direct only)"
-    )]
-    pub no_fallback: bool,
-
-    /// Force the headless browser fallback when the static HTTP
-    /// providers are blocked by Cloudflare. Requires a build with the
-    /// `headless` Cargo feature.
-    #[arg(
-        long,
-        action = ArgAction::SetTrue,
-        help = "Force the headless browser fallback (requires --features headless at build time)"
-    )]
-    pub headless: bool,
 }
 
 impl Cli {
@@ -463,67 +419,165 @@ impl Cli {
             std::env::set_var("YT_DRY_RUN", "1");
         }
     }
+}
 
-    /// Reject combinations of flags that would be impossible or surprenant
-    /// to execute. Returns the first error message as a `String` so the
-    /// caller can wrap it in [`crate::error::AppError::InvalidUsage`].
+/// GAP-E2E-016: per-flag "was this set on the command line?" bitmask.
+/// Populated by [`parse_with_overrides`] via `ArgMatches::value_source`
+/// so the config-file merge can tell apart "user omitted the flag"
+/// from "user passed the flag with the built-in default value".
+///
+/// The previous sentinel logic in `apply_config_overrides` compared
+/// the parsed field against its default literal (e.g.
+/// `if self.timeout == 30`). That pattern silently mis-applied
+/// config overrides when the user passed the flag explicitly with
+/// the same value as the default (`--timeout 30` would still get
+/// overridden by `timeout = 99` from config). Tracking the source
+/// per-field removes the ambiguity.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct CliOverrideFlags {
+    /// `true` if `--lang` appeared on the command line.
+    pub lang: bool,
+    /// `true` if `--format` appeared on the command line.
+    pub format: bool,
+    /// `true` if `--timeout` appeared on the command line.
+    pub timeout: bool,
+    /// `true` if `--cache-ttl` appeared on the command line.
+    pub cache_ttl: bool,
+    /// `true` if `--user-agent` appeared on the command line.
+    pub user_agent: bool,
+    /// `true` if `--log-level` appeared on the command line.
+    pub log_level: bool,
+    /// `true` if `--log-format` appeared on the command line.
+    pub log_format: bool,
+    /// `true` if `--color` appeared on the command line.
+    pub color: bool,
+    /// `true` if `--provider` appeared on the command line.
+    pub provider: bool,
+    /// `true` if `--verbose` appeared on the command line.
+    pub verbose: bool,
+    /// `true` if `--quiet` appeared on the command line.
+    pub quiet: bool,
+    /// `true` if `--json` appeared on the command line.
+    pub json: bool,
+    /// `true` if `--batch` appeared on the command line.
+    pub batch: bool,
+    /// `true` if `--no-cache` appeared on the command line.
+    pub no_cache: bool,
+    /// `true` if `--dry-run` appeared on the command line.
+    pub dry_run: bool,
+    /// `true` if `--no-progress` appeared on the command line.
+    pub no_progress: bool,
+    /// `true` if `--yes` appeared on the command line.
+    pub yes: bool,
+}
+
+/// Parse the CLI and return both the populated [`Cli`] and a
+/// [`CliOverrideFlags`] bitmask describing which flags the user
+/// supplied on the command line (vs which the parser filled from
+/// the `default_value` directive). Calling this in `main` is
+/// strictly equivalent to `Cli::parse()` for the populated `Cli`,
+/// but the additional flag tracking is required to make the
+/// config↔CLI merge deterministic.
+///
+/// # Errors
+///
+/// - Any error `Cli::parse()` would produce: argument parse errors,
+///   conflicting flags rejected by `clap`, invalid value parsers.
+pub fn parse_with_overrides() -> Result<(Cli, CliOverrideFlags), clap::Error> {
+    use clap::parser::ValueSource;
+
+    let cmd = <Cli as clap::CommandFactory>::command();
+    // `get_matches_from` consumes its argv argument; we pass a fresh
+    // iterator each call so the function can be invoked more than
+    // once in the same process (e.g. in tests).
+    let matches = cmd.get_matches_from(std::env::args_os());
+
+    // Walk the matches and read the value source for every flag we
+    // care about. `Some(CommandLine)` means the operator typed it;
+    // `Some(EnvVariable)` means it came from an env var; otherwise
+    // the parser filled from `default_value` and we must treat the
+    // field as "not set by the user".
+    let src = |id: &str| matches.value_source(id) == Some(ValueSource::CommandLine);
+
+    let flags = CliOverrideFlags {
+        lang: src("lang"),
+        format: src("format"),
+        timeout: src("timeout"),
+        cache_ttl: src("cache_ttl"),
+        user_agent: src("user_agent"),
+        log_level: src("log_level"),
+        log_format: src("log_format"),
+        color: src("color"),
+        provider: src("provider"),
+        verbose: src("verbose"),
+        quiet: src("quiet"),
+        json: src("json"),
+        batch: src("batch"),
+        no_cache: src("no_cache"),
+        dry_run: src("dry_run"),
+        no_progress: src("no_progress"),
+        yes: src("yes"),
+    };
+
+    let cli = <Cli as clap::FromArgMatches>::from_arg_matches(&matches)?;
+    Ok((cli, flags))
+}
+
+impl Cli {
+    /// Reject combinations of flags that would be impossible or surprising
+    /// to execute. Returns [`AppError::InvalidUsage`] on the first
+    /// impossibility.
+    ///
+    /// GAP-E2E-015: the previous signature returned `Result<(), String>`
+    /// and forced every caller to bridge the `String → AppError` gap.
+    /// Returning the typed error directly removes the bridge and
+    /// keeps the canonic rule "domain functions return
+    /// `Result<T, AppError>`".
     ///
     /// # Errors
     ///
-    /// Returns `Err(String)` when a flag combination is impossible:
+    /// Returns [`AppError::InvalidUsage`] when a flag combination is
+    /// impossible:
     ///
     /// - `--batch` combined with a positional URL
     /// - no URL, no stdin pipe, and no `--batch`
-    /// - `--asr` combined with a non-direct provider (only
-    ///   `youtube-direct` honours auto-generated captions)
-    /// - `--no-fallback` combined with an explicit provider (the flag
-    ///   is only meaningful under `--provider auto`)
-    pub fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> AppResult<()> {
         if self.batch && self.url.is_some() {
-            return Err("--batch cannot be combined with a positional url".to_string());
+            return Err(AppError::InvalidUsage(
+                "--batch cannot be combined with a positional url".to_string(),
+            ));
         }
         if self.url.is_none() && is_stdin_tty_or_blocked() && !self.batch {
-            return Err(
+            return Err(AppError::InvalidUsage(
                 "no url provided; pass a positional url, pipe through stdin, or use --batch"
                     .to_string(),
-            );
+            ));
         }
         if self.url.as_ref().is_some_and(|u| u.len() > 2048) {
-            return Err("url exceeds 2048 characters".to_string());
+            return Err(AppError::InvalidUsage(
+                "url exceeds 2048 characters".to_string(),
+            ));
         }
         if self.quiet && self.verbose {
-            return Err("--quiet cannot be combined with --verbose".to_string());
+            return Err(AppError::InvalidUsage(
+                "--quiet cannot be combined with --verbose".to_string(),
+            ));
         }
         if self.timeout == 0 {
-            return Err("--timeout must be greater than zero".to_string());
+            return Err(AppError::InvalidUsage(
+                "--timeout must be greater than zero".to_string(),
+            ));
         }
         if self.cache_ttl == 0 {
-            return Err("--cache-ttl must be greater than zero".to_string());
+            return Err(AppError::InvalidUsage(
+                "--cache-ttl must be greater than zero".to_string(),
+            ));
         }
         if self.dry_run && self.batch {
-            return Err("--dry-run cannot be combined with --batch".to_string());
-        }
-        if let Some(provider) = self.provider {
-            if self.asr
-                && !matches!(
-                    provider,
-                    ProviderChoice::Auto | ProviderChoice::YoutubeDirect
-                )
-            {
-                return Err(format!(
-                    "--asr is only valid with --provider auto or --provider youtube-direct (got --provider {})",
-                    provider.as_str()
-                ));
-            }
-            if self.no_fallback && !matches!(provider, ProviderChoice::Auto) {
-                return Err(format!(
-                    "--no-fallback is only valid with --provider auto (got --provider {})",
-                    provider.as_str()
-                ));
-            }
-        }
-        if self.headless && !cfg!(feature = "headless") {
-            return Err("--headless requires building with `--features headless`".to_string());
+            return Err(AppError::InvalidUsage(
+                "--dry-run cannot be combined with --batch".to_string(),
+            ));
         }
         Ok(())
     }
@@ -572,20 +626,23 @@ fn parse_language(raw: &str) -> Result<LanguageArg, String> {
 ///
 /// # Errors
 ///
-/// - [`crate::error::AppError::InvalidInput`] when the file is missing,
-///   unreadable, or contains malformed TOML or an unknown key.
+/// - [`crate::error::AppError::Config`] when the file is missing,
+///   unreadable, or contains malformed TOML or an unknown key. This
+///   maps to sysexits `EX_CONFIG = 78`, distinct from
+///   `AppError::InvalidUsage` (exit 64) which is reserved for
+///   post-parse CLI argument validation failures.
 pub fn load_config(path: &std::path::Path) -> AppResult<ConfigOverrides> {
     use crate::error::AppError;
     use std::fs;
 
     let text = fs::read_to_string(path).map_err(|e| {
-        AppError::InvalidInput(format!(
+        AppError::Config(format!(
             "could not read config file {}: {e}",
             path.display()
         ))
     })?;
     let table: toml::Table = text.parse().map_err(|e| {
-        AppError::InvalidInput(format!(
+        AppError::Config(format!(
             "config file {} is not valid TOML: {e}",
             path.display()
         ))
@@ -604,7 +661,7 @@ pub fn load_config(path: &std::path::Path) -> AppResult<ConfigOverrides> {
             }
             "lang" => {
                 let raw = value.as_str().ok_or_else(|| invalid_type(key, "string"))?;
-                out.lang = Some(parse_language(raw).map_err(AppError::InvalidInput)?);
+                out.lang = Some(parse_language(raw).map_err(AppError::Config)?);
             }
             "format" => {
                 let raw = value.as_str().ok_or_else(|| invalid_type(key, "string"))?;
@@ -612,7 +669,7 @@ pub fn load_config(path: &std::path::Path) -> AppResult<ConfigOverrides> {
                     "txt" => FormatArg::Txt,
                     "srt" => FormatArg::Srt,
                     other => {
-                        return Err(AppError::InvalidInput(format!(
+                        return Err(AppError::Config(format!(
                             "config: invalid format `{other}` (expected txt or srt)"
                         )))
                     }
@@ -700,30 +757,13 @@ pub fn load_config(path: &std::path::Path) -> AppResult<ConfigOverrides> {
                 let raw = value.as_str().ok_or_else(|| invalid_type(key, "string"))?;
                 out.provider = Some(match raw {
                     "auto" => ProviderChoice::Auto,
-                    "youtube-direct" => ProviderChoice::YoutubeDirect,
-                    "provider-a" => ProviderChoice::ProviderA,
-                    "provider-b" => ProviderChoice::ProviderB,
-                    "provider-headless" => ProviderChoice::ProviderHeadless,
+                    "provider-noteey" => ProviderChoice::ProviderNoteey,
                     other => {
-                        return Err(AppError::InvalidInput(format!(
-                            "config: invalid provider `{other}` (expected auto|youtube-direct|provider-a|provider-b|provider-headless)"
+                        return Err(AppError::Config(format!(
+                            "config: invalid provider `{other}` (expected auto|provider-noteey)"
                         )))
                     }
                 });
-            }
-            "asr" => {
-                out.asr = Some(
-                    value
-                        .as_bool()
-                        .ok_or_else(|| invalid_type(key, "boolean"))?,
-                )
-            }
-            "no_fallback" => {
-                out.no_fallback = Some(
-                    value
-                        .as_bool()
-                        .ok_or_else(|| invalid_type(key, "boolean"))?,
-                )
             }
             "log_level" => {
                 let raw = value.as_str().ok_or_else(|| invalid_type(key, "string"))?;
@@ -734,7 +774,7 @@ pub fn load_config(path: &std::path::Path) -> AppResult<ConfigOverrides> {
                     "debug" => LogLevelArg::Debug,
                     "trace" => LogLevelArg::Trace,
                     other => {
-                        return Err(AppError::InvalidInput(format!(
+                        return Err(AppError::Config(format!(
                         "config: invalid log_level `{other}` (expected error|warn|info|debug|trace)"
                     )))
                     }
@@ -746,7 +786,7 @@ pub fn load_config(path: &std::path::Path) -> AppResult<ConfigOverrides> {
                     "text" => LogFormatArg::Text,
                     "json" => LogFormatArg::Json,
                     other => {
-                        return Err(AppError::InvalidInput(format!(
+                        return Err(AppError::Config(format!(
                             "config: invalid log_format `{other}` (expected text or json)"
                         )))
                     }
@@ -759,16 +799,14 @@ pub fn load_config(path: &std::path::Path) -> AppResult<ConfigOverrides> {
                     "always" => ColorArg::Always,
                     "never" => ColorArg::Never,
                     other => {
-                        return Err(AppError::InvalidInput(format!(
+                        return Err(AppError::Config(format!(
                             "config: invalid color `{other}` (expected auto|always|never)"
                         )))
                     }
                 });
             }
             other => {
-                return Err(AppError::InvalidInput(format!(
-                    "config: unknown key `{other}`"
-                )));
+                return Err(AppError::Config(format!("config: unknown key `{other}`")));
             }
         }
     }
@@ -776,7 +814,7 @@ pub fn load_config(path: &std::path::Path) -> AppResult<ConfigOverrides> {
 }
 
 fn invalid_type(key: &str, expected: &str) -> crate::error::AppError {
-    crate::error::AppError::InvalidInput(format!(
+    crate::error::AppError::Config(format!(
         "config: key `{key}` has wrong type (expected {expected})"
     ))
 }
@@ -808,109 +846,110 @@ pub struct ConfigOverrides {
     pub log_format: Option<LogFormatArg>,
     pub color: Option<ColorArg>,
     pub provider: Option<ProviderChoice>,
-    pub asr: Option<bool>,
-    pub no_fallback: Option<bool>,
 }
 
 impl Cli {
     /// Merge config-file overrides into a freshly-parsed Cli. CLI
-    /// flags always win: a `Some` on the Cli field is left alone,
-    /// and only `None` (default) fields are replaced with the
-    /// config-file value.
-    pub fn apply_config_overrides(&mut self, cfg: ConfigOverrides) {
-        if self.url.is_none() {
-            self.url = cfg.url;
-        }
-        if matches!(self.lang, LanguageArg::En) {
+    /// flags always win: a flag the operator set on the command line
+    /// (recorded in [`CliOverrideFlags`]) is left alone, and only
+    /// flags the operator omitted are replaced with the config-file
+    /// value when present.
+    ///
+    /// GAP-E2E-016: the previous implementation compared each field
+    /// against its default literal (`if self.timeout == 30`) to
+    /// detect "operator omitted the flag". That sentinel silently
+    /// mis-applied config overrides when the operator typed the flag
+    /// explicitly with the same value as the default
+    /// (`--timeout 30` would still get overridden by `timeout = 99`
+    /// from config). `flags` is the only reliable source for the
+    /// "did the operator set this?" answer.
+    pub fn apply_config_overrides(&mut self, cfg: ConfigOverrides, flags: &CliOverrideFlags) {
+        if !flags.lang {
             if let Some(l) = cfg.lang {
                 self.lang = l;
             }
         }
-        if matches!(self.format, FormatArg::Txt) {
+        if !flags.format {
             if let Some(f) = cfg.format {
                 self.format = f;
             }
         }
-        if self.timeout == 30 {
+        if !flags.timeout {
             if let Some(t) = cfg.timeout {
                 self.timeout = t;
             }
         }
-        if self.cache_ttl == 24 {
+        if !flags.cache_ttl {
             if let Some(t) = cfg.cache_ttl {
                 self.cache_ttl = t;
             }
         }
-        if self.user_agent.is_none() {
+        if !flags.user_agent {
             self.user_agent = cfg.user_agent;
         }
-        if !self.verbose {
+        if !flags.verbose {
             if let Some(v) = cfg.verbose {
                 self.verbose = v;
             }
         }
-        if !self.quiet {
+        if !flags.quiet {
             if let Some(q) = cfg.quiet {
                 self.quiet = q;
             }
         }
-        if !self.json {
+        if !flags.json {
             if let Some(j) = cfg.json {
                 self.json = j;
             }
         }
-        if !self.batch {
+        if !flags.batch {
             if let Some(b) = cfg.batch {
                 self.batch = b;
             }
         }
-        if !self.no_cache {
+        if !flags.no_cache {
             if let Some(n) = cfg.no_cache {
                 self.no_cache = n;
             }
         }
-        if !self.dry_run {
+        if !flags.dry_run {
             if let Some(d) = cfg.dry_run {
                 self.dry_run = d;
             }
         }
-        if !self.no_progress {
+        if !flags.no_progress {
             if let Some(n) = cfg.no_progress {
                 self.no_progress = n;
             }
         }
-        if !self.yes {
+        if !flags.yes {
             if let Some(y) = cfg.yes {
                 self.yes = y;
             }
         }
-        if matches!(self.log_level, LogLevelArg::Warn) {
+        if !flags.log_level {
             if let Some(l) = cfg.log_level {
                 self.log_level = l;
             }
         }
-        if matches!(self.log_format, LogFormatArg::Text) {
+        if !flags.log_format {
             if let Some(f) = cfg.log_format {
                 self.log_format = f;
             }
         }
-        if matches!(self.color, ColorArg::Auto) {
+        if !flags.color {
             if let Some(c) = cfg.color {
                 self.color = c;
             }
         }
-        if self.provider.is_none() {
+        if !flags.provider {
             self.provider = cfg.provider;
         }
-        if !self.asr {
-            if let Some(v) = cfg.asr {
-                self.asr = v;
-            }
-        }
-        if !self.no_fallback {
-            if let Some(v) = cfg.no_fallback {
-                self.no_fallback = v;
-            }
+        // `url` is positional and has no `default_value`, so it is
+        // always considered "operator omitted" when `None`. We keep
+        // the same behaviour as before.
+        if self.url.is_none() {
+            self.url = cfg.url;
         }
     }
 }
@@ -927,6 +966,38 @@ mod tests {
     use crate::cli::{ColorArg, LogFormatArg, LogLevelArg};
     use crate::error::AppError;
     use clap::Parser;
+
+    /// Test-only helper: drive `parse_with_overrides` from a
+    /// controllable argv slice instead of `std::env::args_os`.
+    /// Returns `(Cli, CliOverrideFlags)` for assertion.
+    fn parse_with_overrides_from<const N: usize>(args: [&str; N]) -> (Cli, CliOverrideFlags) {
+        let cmd = <Cli as clap::CommandFactory>::command();
+        let matches = cmd.get_matches_from(args);
+        use clap::parser::ValueSource;
+        let src = |id: &str| matches.value_source(id) == Some(ValueSource::CommandLine);
+        let flags = CliOverrideFlags {
+            lang: src("lang"),
+            format: src("format"),
+            timeout: src("timeout"),
+            cache_ttl: src("cache_ttl"),
+            user_agent: src("user_agent"),
+            log_level: src("log_level"),
+            log_format: src("log_format"),
+            color: src("color"),
+            provider: src("provider"),
+            verbose: src("verbose"),
+            quiet: src("quiet"),
+            json: src("json"),
+            batch: src("batch"),
+            no_cache: src("no_cache"),
+            dry_run: src("dry_run"),
+            no_progress: src("no_progress"),
+            yes: src("yes"),
+        };
+        let cli =
+            <Cli as clap::FromArgMatches>::from_arg_matches(&matches).expect("test argv is valid");
+        (cli, flags)
+    }
 
     fn make_cli(url: Option<&str>, batch: bool) -> Cli {
         let mut args = vec!["youtube-legend-cli".to_string()];
@@ -946,6 +1017,35 @@ mod tests {
     }
 
     #[test]
+    fn clap_rejects_invalid_language_via_try_parse_from() {
+        // GAP-AUD-002: --lang xx exits with code 2 via clap::Error::exit()
+        // before reaching AppError. try_parse_from returns Err so we can
+        // assert the type without spawning a process. The exit code 2 is
+        // produced by clap::Error::exit() in src/main.rs.
+        use clap::Parser;
+        let result = Cli::try_parse_from([
+            "youtube-legend-cli",
+            "--lang",
+            "xx",
+            "https://youtu.be/dQw4w9WgXcQ",
+        ]);
+        assert!(
+            result.is_err(),
+            "clap must reject --lang xx before reaching AppError"
+        );
+        let err = result.unwrap_err();
+        // clap v4 reports rejected enum values as `ValueValidation`
+        // (a sub-kind of argument validation), not the legacy
+        // `InvalidValue`. Either way, the kind is a parse-time error
+        // — never reaching `AppError::exit_code()` — and the process
+        // exits with code 2 via `clap::Error::exit()`.
+        assert!(matches!(
+            err.kind(),
+            clap::error::ErrorKind::ValueValidation | clap::error::ErrorKind::InvalidValue
+        ));
+    }
+
+    #[test]
     fn validate_accepts_batch_with_stdin() {
         let cli = make_cli(None, true);
         assert!(cli.validate().is_ok());
@@ -955,7 +1055,8 @@ mod tests {
     fn validate_rejects_url_and_batch_together() {
         let cli = make_cli(Some("https://youtu.be/dQw4w9WgXcQ"), true);
         let err = cli.validate().unwrap_err();
-        assert!(err.contains("--batch cannot be combined"));
+        assert!(matches!(err, AppError::InvalidUsage(_)));
+        assert!(err.to_string().contains("--batch cannot be combined"));
     }
 
     #[test]
@@ -963,7 +1064,8 @@ mod tests {
         let long = "a".repeat(2049);
         let cli = make_cli(Some(&long), false);
         let err = cli.validate().unwrap_err();
-        assert!(err.contains("exceeds 2048"));
+        assert!(matches!(err, AppError::InvalidUsage(_)));
+        assert!(err.to_string().contains("exceeds 2048"));
     }
 
     #[test]
@@ -975,7 +1077,8 @@ mod tests {
             "--verbose",
         ]);
         let err = cli.validate().unwrap_err();
-        assert!(err.contains("--quiet"));
+        assert!(matches!(err, AppError::InvalidUsage(_)));
+        assert!(err.to_string().contains("--quiet"));
     }
 
     #[test]
@@ -987,7 +1090,8 @@ mod tests {
             "0",
         ]);
         let err = cli.validate().unwrap_err();
-        assert!(err.contains("--timeout"));
+        assert!(matches!(err, AppError::InvalidUsage(_)));
+        assert!(err.to_string().contains("--timeout"));
     }
 
     #[test]
@@ -999,7 +1103,8 @@ mod tests {
             "0",
         ]);
         let err = cli.validate().unwrap_err();
-        assert!(err.contains("--cache-ttl"));
+        assert!(matches!(err, AppError::InvalidUsage(_)));
+        assert!(err.to_string().contains("--cache-ttl"));
     }
 
     #[test]
@@ -1008,7 +1113,7 @@ mod tests {
         let res = cli.validate();
         let is_tty = is_stdin_tty_or_blocked();
         if is_tty {
-            assert!(res.is_err());
+            assert!(matches!(res, Err(AppError::InvalidUsage(_))));
         } else {
             assert!(res.is_ok());
         }
@@ -1111,8 +1216,9 @@ mod tests {
     fn dry_run_rejects_batch() {
         let cli = Cli::parse_from(["youtube-legend-cli", "--dry-run", "--batch"]);
         let err = cli.validate().unwrap_err();
-        assert!(err.contains("--dry-run"));
-        assert!(err.contains("--batch"));
+        assert!(matches!(err, AppError::InvalidUsage(_)));
+        assert!(err.to_string().contains("--dry-run"));
+        assert!(err.to_string().contains("--batch"));
     }
 
     #[test]
@@ -1200,7 +1306,8 @@ color = "never"
         let path = dir.join("yt_legend_config_test_bad.toml");
         std::fs::write(&path, "this is not = toml [[[").expect("write tmp");
         let err = load_config(&path).unwrap_err();
-        assert!(matches!(err, AppError::InvalidInput(_)));
+        assert!(matches!(err, AppError::Config(_)));
+        assert_eq!(err.exit_code(), 78);
         let msg = err.to_string();
         assert!(msg.contains("not valid TOML"), "actual: {msg}");
         std::fs::remove_file(&path).ok();
@@ -1212,6 +1319,8 @@ color = "never"
         let path = dir.join("yt_legend_config_test_unknown.toml");
         std::fs::write(&path, "definitely_not_a_flag = 1\n").expect("write tmp");
         let err = load_config(&path).unwrap_err();
+        assert!(matches!(err, AppError::Config(_)));
+        assert_eq!(err.exit_code(), 78);
         let msg = err.to_string();
         assert!(
             msg.contains("unknown key `definitely_not_a_flag`"),
@@ -1224,12 +1333,13 @@ color = "never"
     fn load_config_rejects_missing_file() {
         let path = std::path::Path::new("/nonexistent/path/yt_legend.toml");
         let err = load_config(path).unwrap_err();
-        assert!(matches!(err, AppError::InvalidInput(_)));
+        assert!(matches!(err, AppError::Config(_)));
+        assert_eq!(err.exit_code(), 78);
     }
 
     #[test]
     fn apply_config_overrides_cli_wins() {
-        let mut cli = Cli::parse_from([
+        let (mut cli, flags) = parse_with_overrides_from([
             "youtube-legend-cli",
             "https://youtu.be/from_cli",
             "--lang",
@@ -1241,17 +1351,19 @@ color = "never"
             timeout: Some(99),
             ..Default::default()
         };
-        cli.apply_config_overrides(cfg);
-        // CLI wins on url (not the default) and lang.
+        cli.apply_config_overrides(cfg, &flags);
+        // CLI wins on url (positional, not defaultable) and lang
+        // (operator passed `--lang es` so `flags.lang` is true).
         assert_eq!(cli.url.as_deref(), Some("https://youtu.be/from_cli"));
         assert!(matches!(cli.lang, LanguageArg::Es));
-        // Config fills in defaults (timeout changed from 30 → 99).
+        // Config fills in defaults (timeout was omitted on CLI,
+        // `flags.timeout` is false, so the override applies).
         assert_eq!(cli.timeout, 99);
     }
 
     #[test]
     fn apply_config_overrides_config_fills_defaults() {
-        let mut cli = Cli::parse_from(["youtube-legend-cli"]);
+        let (mut cli, flags) = parse_with_overrides_from(["youtube-legend-cli"]);
         let cfg = ConfigOverrides {
             timeout: Some(45),
             cache_ttl: Some(2),
@@ -1259,11 +1371,37 @@ color = "never"
             color: Some(ColorArg::Always),
             ..Default::default()
         };
-        cli.apply_config_overrides(cfg);
+        cli.apply_config_overrides(cfg, &flags);
         assert_eq!(cli.timeout, 45);
         assert_eq!(cli.cache_ttl, 2);
         assert!(matches!(cli.log_level, LogLevelArg::Trace));
         assert!(matches!(cli.color, ColorArg::Always));
+    }
+
+    /// GAP-E2E-016 regression: when the operator types a flag
+    /// explicitly with the same value as the built-in default
+    /// (`--timeout 30` for example), the previous sentinel logic
+    /// `if self.timeout == 30` would mis-classify that field as
+    /// "operator omitted" and let the config override win. The
+    /// `CliOverrideFlags` bitmask avoids the ambiguity.
+    #[test]
+    fn apply_config_overrides_explicit_default_does_not_get_overridden() {
+        let (mut cli, flags) = parse_with_overrides_from(["youtube-legend-cli", "--timeout", "30"]);
+        let cfg = ConfigOverrides {
+            timeout: Some(99),
+            ..Default::default()
+        };
+        cli.apply_config_overrides(cfg, &flags);
+        assert!(
+            flags.timeout,
+            "flags.timeout must report explicit CLI usage"
+        );
+        // The explicit `--timeout 30` MUST survive the merge even
+        // though its value matches the built-in default.
+        assert_eq!(
+            cli.timeout, 30,
+            "explicit CLI default value must NOT be overridden by config"
+        );
     }
 
     fn format_fmt(f: FormatArg) -> &'static str {
@@ -1278,10 +1416,7 @@ color = "never"
         use crate::cli::ProviderChoice;
         let cases = [
             ("auto", ProviderChoice::Auto),
-            ("youtube-direct", ProviderChoice::YoutubeDirect),
-            ("provider-a", ProviderChoice::ProviderA),
-            ("provider-b", ProviderChoice::ProviderB),
-            ("provider-headless", ProviderChoice::ProviderHeadless),
+            ("provider-noteey", ProviderChoice::ProviderNoteey),
         ];
         for (flag, expected) in cases {
             let cli = Cli::parse_from([
@@ -1292,56 +1427,5 @@ color = "never"
             ]);
             assert_eq!(cli.provider, Some(expected), "failed for {flag}");
         }
-    }
-
-    #[test]
-    fn asr_flag_propagates_to_provider() {
-        let cli = Cli::parse_from([
-            "youtube-legend-cli",
-            "https://youtu.be/dQw4w9WgXcQ",
-            "--provider",
-            "youtube-direct",
-            "--asr",
-        ]);
-        assert!(cli.asr);
-        assert!(cli.validate().is_ok());
-
-        // Reject with provider-a.
-        let cli = Cli::parse_from([
-            "youtube-legend-cli",
-            "https://youtu.be/dQw4w9WgXcQ",
-            "--provider",
-            "provider-a",
-            "--asr",
-        ]);
-        let err = cli.validate().unwrap_err();
-        assert!(err.contains("--asr"), "actual: {err}");
-        assert!(err.contains("provider-a"), "actual: {err}");
-    }
-
-    #[test]
-    fn no_fallback_blocks_provider_a() {
-        // --no-fallback is only valid with --provider auto.
-        let cli = Cli::parse_from([
-            "youtube-legend-cli",
-            "https://youtu.be/dQw4w9WgXcQ",
-            "--provider",
-            "provider-a",
-            "--no-fallback",
-        ]);
-        let err = cli.validate().unwrap_err();
-        assert!(err.contains("--no-fallback"), "actual: {err}");
-        assert!(err.contains("provider-a"), "actual: {err}");
-
-        // Valid combo: --no-fallback with --provider auto.
-        let cli = Cli::parse_from([
-            "youtube-legend-cli",
-            "https://youtu.be/dQw4w9WgXcQ",
-            "--provider",
-            "auto",
-            "--no-fallback",
-        ]);
-        assert!(cli.no_fallback);
-        assert!(cli.validate().is_ok());
     }
 }

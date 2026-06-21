@@ -2,8 +2,7 @@
 
 use std::process::ExitCode;
 
-use clap::Parser;
-use youtube_legend_cli::cli::{load_config, Cli};
+use youtube_legend_cli::cli::{load_config, parse_with_overrides};
 use youtube_legend_cli::error::AppError;
 use youtube_legend_cli::logging::init_tracing;
 use youtube_legend_cli::run;
@@ -16,15 +15,45 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() -> ExitCode {
-    let mut cli = Cli::parse();
+    // GAP-E2E-016: `parse_with_overrides` returns both the parsed
+    // `Cli` and a `CliOverrideFlags` bitmask describing which flags
+    // the operator actually typed (vs which the parser filled from
+    // `default_value`). The bitmask is the only reliable input to
+    // `apply_config_overrides` because it does not rely on a
+    // sentinel comparison against a literal default value.
+    //
+    // `parse_with_overrides` cannot return a `Cli` directly because
+    // clap's `Command::get_matches_from_mut` consumes the args and
+    // we need to inspect `value_source` before building `Cli`. The
+    // trade-off is one extra allocation for the `matches` builder,
+    // which is negligible against the per-extraction HTTP cost.
+    let (mut cli, cli_overrides) = match parse_with_overrides() {
+        Ok(pair) => pair,
+        Err(e) => {
+            // `clap::Error::exit` prints the error and terminates
+            // the process via `std::process::exit(2)` — this is the
+            // canonical clap behaviour for parse-time argument
+            // validation failures (see rules-rust-cli-com-clap-io-
+            // exitcodes-erros: `CONVERTER clap::Error em exit code 2
+            // para uso incorreto`).
+            e.exit();
+        }
+    };
 
     // 1. Apply config-file overrides BEFORE we propagate env vars, so
     //    the effective level/format take config + CLI into account.
     if let Some(path) = cli.config.clone() {
         match load_config(&path) {
-            Ok(overrides) => cli.apply_config_overrides(overrides),
+            Ok(overrides) => cli.apply_config_overrides(overrides, &cli_overrides),
             Err(e) => {
-                eprintln!("config error: {e}");
+                // GAP-E2E-013: `AppError::Config`'s Display already
+                // includes the `config error: ` prefix (see
+                // src/error.rs:181). The previous code duplicated it
+                // via this `eprintln!("config error: {e}")`, producing
+                // `config error: config error: <path>` to the operator.
+                // Emit the Display directly and rely on the
+                // `Termination` impl to route the matching exit code.
+                eprintln!("{e}");
                 return ExitCode::from(e.exit_code());
             }
         }

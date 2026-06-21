@@ -150,8 +150,10 @@ fn nfr_005_offline_cache_miss_returns_five() {
     // documented contract for a fetch that cannot complete.
     let mut cmd = Command::cargo_bin("youtube-legend-cli").expect("binary");
     cmd.env("YOUTUBE_LEGEND_CLI_AUTHOR", &tmp)
+        .env("YT_LEGEND_NO_NETWORK", "1")
         .arg("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         .arg("--json")
+        .arg("--no-cache")
         .arg("--timeout")
         .arg("2")
         .timeout(std::time::Duration::from_secs(30));

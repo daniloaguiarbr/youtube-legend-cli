@@ -61,7 +61,7 @@ async fn provider_a_fetches_subtitle_success() {
 }
 
 #[tokio::test]
-async fn provider_a_returns_invalid_url_on_400() {
+async fn provider_a_returns_no_subtitle_on_400() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(400))
@@ -70,10 +70,15 @@ async fn provider_a_returns_invalid_url_on_400() {
     let err = classify_response(&server.uri())
         .await
         .expect_err("400 must fail");
-    // 400 has no special-case in NoSubtitleReason::from_status, so
-    // it falls through to the generic "no success" path which the
-    // real provider maps to ProviderUnavailable.
-    assert!(matches!(err, AppError::ProviderUnavailable));
+    // GAP-E2E-026: HTTP 400 from the YouTube timedtext endpoint means
+    // "no captions exist for this video". The previous mapping sent
+    // 400 to ProviderUnavailable (exit 69); the new mapping unifies
+    // 400 with the rest of the NoSubtitle family (exit 66). The
+    // helper's `from_status(400)` now resolves to NotPublished.
+    assert!(matches!(
+        err,
+        AppError::NoSubtitle(NoSubtitleReason::NotPublished)
+    ));
 }
 
 #[tokio::test]

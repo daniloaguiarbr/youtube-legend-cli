@@ -2,7 +2,6 @@
 
 use crate::cli::{Cli, ProviderChoice};
 use crate::error::{AppError, AppResult};
-use crate::parse::srt_to_text;
 use crate::parse::video_id::extract_video_id;
 use crate::provider::{Format, ProviderChain};
 use crate::text::normalize_nfc;
@@ -14,13 +13,20 @@ pub mod extract;
 
 #[derive(Debug, Serialize)]
 struct JsonSuccess {
+    /// Provider name that delivered the transcript (`provider-noteey`
+    /// or `cache` for cache hits).
+    provider: &'static str,
     video_id: String,
     language: String,
     format: String,
     content: String,
-    bytes: u64,
+    /// GAP-AUD-2026-050: renamed from `bytes` to `byte_size` to match
+    /// the contract documented in `docs/AGENTS.pt-BR.md`.
+    byte_size: u64,
     duration_ms: u64,
-    source: String,
+    /// GAP-AUD-2026-050: renamed from `source` to `source_url` to
+    /// match the contract documented in `docs/AGENTS.pt-BR.md`.
+    source_url: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -30,17 +36,33 @@ struct JsonError {
     message: String,
 }
 
+/// GAP-E2E-009: dry-run envelope. Emitted to stdout under `--dry-run`
+/// so operators can distinguish cache-miss-dry-run (would fetch)
+/// from cache-hit-dry-run (would skip) by parsing the `event` field,
+/// instead of branching on the legacy `exit 66` signal that the
+/// previous implementation produced.
+#[derive(Debug, Serialize)]
+struct JsonDryRun {
+    event: &'static str,
+    video_id: String,
+    language: String,
+    format: String,
+    would_fetch: bool,
+}
+
 /// Dispatch a validated [`Cli`] to the single-URL or batch runner.
 ///
 /// # Errors
 ///
 /// - [`AppError::InvalidUsage`] when the [`Cli::validate`] check fails.
 /// - All provider / network / cache / IO errors bubble up.
-#[tracing::instrument(level = "debug", err, skip(cli), fields(batch = cli.batch, url = ?cli.url, json = cli.json, verbose = cli.verbose, provider = ?cli.provider, asr = cli.asr, no_fallback = cli.no_fallback))]
+#[tracing::instrument(level = "debug", err, skip(cli), fields(batch = cli.batch, url = ?cli.url, json = cli.json, verbose = cli.verbose, provider = ?cli.provider))]
 pub async fn run(cli: Cli) -> AppResult<ExitCode> {
-    if let Err(msg) = cli.validate() {
-        return Err(AppError::InvalidUsage(msg));
-    }
+    // GAP-E2E-015: `cli.validate()` now returns `AppResult<()>` so the
+    // `?` propagates `AppError::InvalidUsage` directly. The previous
+    // bridge `if let Err(msg) = cli.validate() { return Err(AppError::InvalidUsage(msg)); }`
+    // is gone.
+    cli.validate()?;
 
     let chain = build_provider_chain(&cli);
 
@@ -53,112 +75,18 @@ pub async fn run(cli: Cli) -> AppResult<ExitCode> {
 
 /// Build the [`ProviderChain`] for a given [`Cli`].
 ///
-/// # Chain order
-///
-/// The order of providers tried at runtime is the order they are
-/// pushed into the `Vec` passed to [`ProviderChain::new`]. The
-/// following table defines what each [`ProviderChoice`] maps to:
-///
-/// | `--provider`          | Chain order (try in this sequence)            |
-/// |-----------------------|------------------------------------------------|
-/// | `auto` (default)      | `youtube-direct` → `provider-a` → `provider-b` → [`provider-headless`] |
-/// | `youtube-direct`      | `youtube-direct` only                           |
-/// | `provider-a`          | `provider-a` only (v0.2.9 regression)         |
-/// | `provider-b`          | `provider-b` only (v0.2.9 regression)         |
-/// | `provider-headless`   | `provider-headless` only (feature-gated)     |
-///
-/// `provider-headless` is only appended when the crate was built
-/// with the `headless` feature; otherwise the chain ends at
-/// `provider-b`.
-///
-/// `--no-fallback` short-circuits the `auto` chain to only the
-/// `youtube-direct` provider. The flag is rejected at validation
-/// time when paired with any other provider (see [`Cli::validate`]).
-///
-/// `--asr` is propagated to the direct provider via
-/// [`ProviderYouTubeDirect::prefer_asr`]. The flag is rejected at
-/// validation time when paired with a non-direct provider.
-#[tracing::instrument(level = "debug", skip(cli), fields(provider = ?cli.provider, asr = cli.asr, no_fallback = cli.no_fallback))]
+/// The CLI uses exclusively the noteey.com provider. Both `auto`
+/// (default) and `provider-noteey` resolve to a chain containing only
+/// [`crate::provider::provider_noteey::ProviderNoteey`].
+#[tracing::instrument(level = "debug", skip(cli), fields(provider = ?cli.provider))]
 fn build_provider_chain(cli: &Cli) -> ProviderChain {
-    use crate::provider::provider_a::ProviderA;
-    use crate::provider::provider_b::ProviderB;
-    use crate::provider::provider_youtube_direct::ProviderYouTubeDirect;
-
-    let user_agent = cli.effective_user_agent();
     let mut providers: Vec<Box<dyn crate::provider::Provider>> = Vec::new();
 
-    // Resolve the effective strategy once. Defaults to `Auto` when
-    // the user did not pass `--provider` (CLI flag or TOML override).
-    let choice = cli.provider.unwrap_or(ProviderChoice::Auto);
+    let _choice = cli.provider.unwrap_or(ProviderChoice::Auto);
 
-    match choice {
-        ProviderChoice::Auto => {
-            // Order: youtube-direct -> provider-a -> provider-b -> [provider-headless].
-            // When `--no-fallback` is set, the chain collapses to the
-            // direct provider only.
-            if let Ok(direct) =
-                ProviderYouTubeDirect::with_user_agent(&user_agent).map(|p| p.prefer_asr(cli.asr))
-            {
-                providers.push(Box::new(direct));
-            }
-            if !cli.no_fallback {
-                if let Ok(p) = ProviderA::with_user_agent(&user_agent) {
-                    providers.push(Box::new(p));
-                }
-                if let Ok(p) = ProviderB::with_user_agent(&user_agent) {
-                    providers.push(Box::new(p));
-                }
-            }
-            // Inject headless in Auto mode when either:
-            //   * --headless is set (operator explicitly asked for the
-            //     headless path, even if --no-fallback was passed), or
-            //   * --no-fallback is NOT set (the default Auto chain ends
-            //     with the headless provider as a last-resort fallback).
-            if cli.headless || !cli.no_fallback {
-                #[cfg(feature = "headless")]
-                {
-                    let hl = crate::provider::provider_headless::ProviderHeadless::new()
-                        .with_language(language_to_str(cli.lang));
-                    providers.push(Box::new(hl));
-                }
-                #[cfg(not(feature = "headless"))]
-                {
-                    // When the binary was not built with --features headless,
-                    // --headless is already rejected in Cli::validate.
-                }
-            }
-        }
-        ProviderChoice::YoutubeDirect => {
-            if let Ok(direct) =
-                ProviderYouTubeDirect::with_user_agent(&user_agent).map(|p| p.prefer_asr(cli.asr))
-            {
-                providers.push(Box::new(direct));
-            }
-        }
-        ProviderChoice::ProviderA => {
-            if let Ok(p) = ProviderA::with_user_agent(&user_agent) {
-                providers.push(Box::new(p));
-            }
-        }
-        ProviderChoice::ProviderB => {
-            if let Ok(p) = ProviderB::with_user_agent(&user_agent) {
-                providers.push(Box::new(p));
-            }
-        }
-        ProviderChoice::ProviderHeadless => {
-            #[cfg(feature = "headless")]
-            {
-                let hl = crate::provider::provider_headless::ProviderHeadless::new()
-                    .with_language(language_to_str(cli.lang));
-                providers.push(Box::new(hl));
-            }
-            // Without the feature flag, the chain is empty and the
-            // caller surfaces `AppError::ProviderUnavailable` via the
-            // chain's exhaustive walk. This preserves the explicit
-            // intent (the user asked for headless) without silently
-            // promoting a fallback.
-        }
-    }
+    let noteey = crate::provider::provider_noteey::ProviderNoteey::new()
+        .with_language(language_to_str(cli.lang));
+    providers.push(Box::new(noteey));
 
     ProviderChain::new(providers)
 }
@@ -191,15 +119,41 @@ pub fn language_to_str(arg: crate::cli::LanguageArg) -> &'static str {
 /// - [`AppError::Internal`] when the bytes are not valid UTF-8.
 /// - [`AppError::InvalidInput`] / [`AppError::SubtitleTooLarge`] when
 ///   the SRT body is malformed or exceeds the 50 MiB cap.
-pub fn convert_format(content: &[u8], format: Format) -> AppResult<String> {
-    match format {
-        Format::Srt => String::from_utf8(content.to_vec())
-            .map_err(|e| AppError::Internal(format!("srt is not valid utf-8: {e}"))),
-        Format::Txt => {
+/// - [`AppError::InvalidUsage`] when `--format srt` is requested but
+///   the body is a noteey transcript (no SRT framing available).
+pub fn convert_format(
+    content: &[u8],
+    format: Format,
+    format_hint: crate::provider::SubtitleFormat,
+) -> AppResult<String> {
+    match (format, format_hint) {
+        // SRT requested and the body is real SubRip — pass through.
+        (Format::Srt, crate::provider::SubtitleFormat::Srt) => {
+            String::from_utf8(content.to_vec())
+                .map_err(|e| AppError::Internal(format!("srt is not valid utf-8: {e}")))
+        }
+        // Txt requested and the body is SRT — convert via srt_to_text.
+        (Format::Txt, crate::provider::SubtitleFormat::Srt) => {
             let srt_text = String::from_utf8(content.to_vec())
                 .map_err(|e| AppError::Internal(format!("srt is not valid utf-8: {e}")))?;
-            srt_to_text(&srt_text)
+            crate::parse::srt_to_text(&srt_text)
         }
+        // Txt requested and the body is noteey-style transcript.
+        (Format::Txt, crate::provider::SubtitleFormat::NoteeyTranscript) => {
+            let raw = String::from_utf8(content.to_vec())
+                .map_err(|e| AppError::Internal(format!("noteey body not valid utf-8: {e}")))?;
+            crate::parse::noteey_to_text(&raw)
+        }
+        // SRT requested but the body is noteey-style — reject rather
+        // than fabricate SubRip timestamps (noteey does not carry
+        // end-of-cue info to produce real SRT).
+        (Format::Srt, crate::provider::SubtitleFormat::NoteeyTranscript) => Err(
+            AppError::InvalidUsage(
+                "--format srt is not available when the only source is noteey.com \
+                 (transcript has no SRT framing); use --format txt (default)"
+                    .to_string(),
+            ),
+        ),
     }
 }
 
@@ -210,23 +164,38 @@ pub fn convert_format(content: &[u8], format: Format) -> AppResult<String> {
 ///
 /// - [`AppError::Serde`] when serialising the JSON envelope.
 /// - [`AppError::Io`] on stdout write failure.
+///
+/// # Envelope shape
+///
+/// JSON envelope fields (GAP-AUD-2026-050):
+/// - `provider` — which provider delivered (`provider-noteey`,
+///   `provider-headless`, `youtube-direct`, `provider-a`,
+///   `provider-b`, or `cache` for cache hits).
+/// - `video_id`, `language`, `format` — request inputs.
+/// - `content` — the cleaned transcript text (utf-8 NFC).
+/// - `byte_size` — length of `content` in bytes.
+/// - `duration_ms` — wall-clock time for the fetch (or cache lookup).
+/// - `source_url` — the upstream URL that returned the raw body
+///   (noteey-prefixed for noteey, youtube timedtext for direct, etc).
 pub async fn output_success(
     cli: &Cli,
+    provider: &'static str,
     video_id: &str,
     content: &str,
-    source: &str,
-    bytes: u64,
+    source_url: &str,
+    byte_size: u64,
     duration_ms: u64,
 ) -> AppResult<()> {
     if cli.json {
         let payload = JsonSuccess {
+            provider,
             video_id: video_id.to_string(),
             language: language_to_str(cli.lang).to_string(),
             format: format_to_str(cli.format).to_string(),
             content: normalize_nfc(content),
-            bytes,
+            byte_size,
             duration_ms,
-            source: source.to_string(),
+            source_url: source_url.to_string(),
         };
         let json = serde_json::to_string(&payload).map_err(AppError::Serde)?;
         crate::io::write_subtitle_to_stdout(json.as_bytes()).await?;
@@ -259,6 +228,39 @@ pub async fn output_error(cli: &Cli, err: &AppError) -> AppResult<()> {
         if let Ok(json) = serde_json::to_string(&payload) {
             let _ = crate::io::write_subtitle_to_stdout(json.as_bytes()).await;
         }
+    }
+    Ok(())
+}
+
+/// GAP-E2E-009: emit the dry-run envelope to stdout. When `--json`
+/// is set the payload is a single JSON object per line; without
+/// `--json` we emit a human-readable line so a curl-like inspection
+/// still surfaces the signal. `would_fetch` reports whether the
+/// dry-run encountered a cache miss (true) or hit (false), letting
+/// callers branch without parsing the `event` string.
+///
+/// # Errors
+///
+/// - [`AppError::Serde`] when serialising the JSON envelope fails.
+/// - [`AppError::Io`] when writing the envelope to stdout fails.
+pub async fn output_dry_run(cli: &Cli, video_id: &str, would_fetch: bool) -> AppResult<()> {
+    if cli.json {
+        let payload = JsonDryRun {
+            event: "dry_run_cache_miss",
+            video_id: video_id.to_string(),
+            language: language_to_str(cli.lang).to_string(),
+            format: format_to_str(cli.format).to_string(),
+            would_fetch,
+        };
+        if let Ok(json) = serde_json::to_string(&payload) {
+            crate::io::write_subtitle_to_stdout(json.as_bytes()).await?;
+        }
+    } else if would_fetch {
+        crate::io::write_subtitle_to_stdout(format!("dry_run_cache_miss {video_id}\n").as_bytes())
+            .await?;
+    } else {
+        crate::io::write_subtitle_to_stdout(format!("dry_run_cache_hit {video_id}\n").as_bytes())
+            .await?;
     }
     Ok(())
 }
@@ -298,8 +300,13 @@ pub async fn extract_url_from_input(cli: &Cli) -> AppResult<String> {
 /// - Any error from [`extract_video_id`].
 pub fn parse_video_id_from_url(cli: &Cli, url: &str) -> AppResult<String> {
     let id = extract_video_id(url)?;
+    // GAP-E2E-017: route the verbose line through `tracing` instead of
+    // `io::write_to_stderr` so the `tracing-subscriber` EnvFilter built
+    // in `logging.rs` (which honours `--quiet` via `EnvFilter::new("error")`)
+    // actually silences it. The previous direct call bypassed the filter
+    // and made the `--quiet` flag inert for this path.
     if cli.verbose && !cli.quiet {
-        let _ = crate::io::write_to_stderr(&format!("extracted video id: {id}\n"));
+        tracing::info!(target: "events", event = "video_id_extracted", video_id = %id);
     }
     Ok(id)
 }

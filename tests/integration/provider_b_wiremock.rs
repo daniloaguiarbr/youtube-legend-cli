@@ -52,7 +52,7 @@ async fn provider_b_fetches_subtitle_success() {
 }
 
 #[tokio::test]
-async fn provider_b_returns_invalid_url_on_400() {
+async fn provider_b_returns_no_subtitle_on_400() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(400))
@@ -61,7 +61,14 @@ async fn provider_b_returns_invalid_url_on_400() {
     let err = classify_response(&server.uri())
         .await
         .expect_err("400 must fail");
-    assert!(matches!(err, AppError::ProviderUnavailable));
+    // GAP-E2E-026: HTTP 400 now maps to NoSubtitle(NotPublished)
+    // across all providers. The previous test name and assertion
+    // (provider_b_returns_invalid_url_on_400 expecting
+    // ProviderUnavailable) are obsoleted by the unification.
+    assert!(matches!(
+        err,
+        AppError::NoSubtitle(NoSubtitleReason::NotPublished)
+    ));
 }
 
 #[tokio::test]

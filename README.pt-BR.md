@@ -4,7 +4,7 @@
 
 [![docs.rs](https://docs.rs/youtube-legend-cli/badge.svg)](https://docs.rs/youtube-legend-cli)
 [![Crates.io](https://img.shields.io/crates/v/youtube-legend-cli.svg)](https://crates.io/crates/youtube-legend-cli)
-[![v0.2.8](https://img.shields.io/badge/release-v0.2.8-blue.svg)](CHANGELOG.md)
+[![v0.3.2](https://img.shields.io/badge/release-v0.3.2-blue.svg)](CHANGELOG.md)
 [![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/youtube-legend-cli.svg)](LICENSE)
 [![MSRV 1.88.0](https://img.shields.io/badge/MSRV-1.88.0-blue.svg)](rust-toolchain.toml)
 [![CI](https://github.com/daniloaguiarbr/youtube-legend-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/daniloaguiarbr/youtube-legend-cli/actions/workflows/ci.yml)
@@ -12,8 +12,9 @@
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 > CLI Rust não interativa que baixa legendas do YouTube via
-> provedores terceirizados, com interface Unix nativa
-> `stdin`/`stdout`. Binário estático único, sem daemon, sem telemetria.
+> navegador headless Chromium (`chromiumoxide 0.9.1`), com interface
+> Unix nativa `stdin`/`stdout`. Binário único, sem daemon, sem
+> telemetria.
 
 ## Visão geral
 
@@ -25,18 +26,13 @@ da legenda no `stdout` e todos os logs e progresso no `stderr`.
 
 ## Funcionalidades
 
-- Pipeline de extração com dois provedores (`provider_a`, `provider_b`)
-  com fallback automático.
-- Cache local em arquivo indexado por `(video_id, language, format)`
-  com TTL configurável (padrão 24h).
+- Extração via Chromium headless com `chromiumoxide 0.9.1` e auto-download via `BrowserFetcher`.
+- Patches anti-fingerprint stealth (`navigator.webdriver`, plugins, languages, vendor WebGL).
+- Cache local em arquivo indexado por `(video_id, language, format)` com TTL configurável (padrão 24h).
 - Modo batch lendo uma URL por linha do `stdin`.
 - Envelope JSON estruturado em `stdout` via `--json`.
-- Backoff exponencial (1s, 2s, 4s) com circuit breaker por provedor.
-- Normalização Unicode NFC e conversão SRT-para-texto.
-- AES-256-CBC mais assinatura de token PBKDF2 para o caminho de
-  compatibilidade `provider_b`.
-- Limite de segurança em memória de 50 MiB no tamanho da legenda
-  decodificada.
+- Normalização Unicode NFC e conversão transcript-para-texto.
+- Limite de segurança em memória de 50 MiB no tamanho da legenda decodificada.
 - Tratamento gracioso de `SIGINT` e `SIGTERM`, sai com código 130.
 - Zero telemetria: sem analytics, sem chamada de rede para casa.
 
@@ -101,7 +97,7 @@ código-fonte em si é portável para qualquer alvo Rust Tier-1.
 O crate envia dois binários:
 
 - `youtube-legend-cli` — o buscador de legendas (padrão).
-- `snapshot` — sonda ambos os provedores e grava snapshots HTML
+- `snapshot` — sonda o provedor e grava snapshots HTML
   redacted sob `tests/fixtures/snapshots/<date>/` para detecção de
   drift. O arquivo `src/secret_endpoints.rs` (gitignored) é
   consumido via `#[path = "..."]` para que os hostnames upstream
@@ -157,7 +153,7 @@ downstream possa ramificar por categoria. Veja
 | `64`   | Uso ou entrada inválida (`EX_USAGE`)                  |
 | `65`   | URL inválida (`EX_DATAERR`)                           |
 | `66`   | Nenhuma legenda para o vídeo (`EX_NOINPUT`)           |
-| `69`   | Todos os provedores indisponíveis, ou rate limited, ou `robots.txt` `Disallow` (`EX_UNAVAILABLE`) |
+| `69`   | Provedor indisponível, browser não encontrado ou rate limited (`EX_UNAVAILABLE`) |
 | `70`   | Erro interno / I/O / HTTP / timeout / crypto (`EX_SOFTWARE`) |
 | `78`   | Erro de configuração no TOML de `--config` (`EX_CONFIG`) |
 | `130`  | Recebido `SIGINT` / `SIGTERM` (primeiro sinal cooperativo, segundo força saída) |
@@ -185,65 +181,36 @@ Requer Rust 1.88.0 ou mais recente. Veja o campo `rust-version` em
 ## Baseline de performance
 
 
-## Provedores (v0.3.0+)
+## Provedor (v0.3.2)
 
-O crate envia quatro provedores de legenda. A CLI tenta-os na
-ordem documentada abaixo em `--provider` até que um retorne uma
-legenda não vazia. A trait `Provider` permanece inalterada desde
-v0.2.x — todo provedor implementa o mesmo contrato `fetch_subtitle`,
-então trocar ou encadear é transparente para o restante do pipeline.
+Desde v0.3.2 a CLI envia um único provedor de legendas:
+`provider-noteey`. Ele dirige uma instância de Chromium headless
+via `chromiumoxide 0.9.1` para extrair transcripts do noteey.com.
 
-| Provedor | Fonte | Quando funciona | Papel de fallback |
-|----------|-------|-----------------|-------------------|
-| `youtube-direct` | Página watch do YouTube + `ytInitialPlayerResponse` + endpoint `timedtext` | Padrão para quase todo vídeo com qualquer trilha de legenda (manual ou ASR) | Primário na cadeia `auto` desde v0.3.0 |
-| `provider_a` | Serviço HTTP terceirizado análogo a downsub.com | Vídeos que o serviço terceirizado indexou | Secundário na cadeia `auto` |
-| `provider_b` | Segundo serviço HTTP terceirizado com assinatura AES-256-CBC + PBKDF2 | Vídeos que o segundo serviço indexou | Terciário na cadeia `auto` |
-| `provider_headless` | Chromium local dirigido por `chromiumoxide` (gateado pela feature `headless`) | Endpoints protegidos por Cloudflare ou browser-gated que bloqueiam os provedores HTTP puros | Fallback opt-in; nunca habilitado por padrão |
+Se nenhum Chrome/Chromium local for encontrado, o `BrowserFetcher`
+auto-baixa Chromium r1585606 (versão 147.0.7693.0) em
+`~/.cache/youtube-legend-cli/browser/`. Use `$CHROME` para
+sobrescrever o caminho do executável.
 
-### Provedor YouTube Direct
-
-O provedor YouTube-direct é a resolução de `GAP-001`. Ele busca
-a página watch, faz parse de `ytInitialPlayerResponse`, escolhe a
-entrada certa de `captionTracks` e baixa o payload do timedtext
-diretamente de `https://www.youtube.com/api/timedtext`. Trata
-legendas manuais e auto-geradas, parâmetros de assinatura, o
-desafio `n`, e cacheia a tabela de operações do `player.js` em
-`~/.cache/youtube-legend-cli/player/` por sete dias.
-
-```bash
-# Manual ou auto-gerada em português, caindo pela cadeia
-youtube-legend-cli https://youtu.be/Ze0i7zxpyrw --lang pt --provider youtube-direct --asr
-```
-
-A flag `--asr` faz o provedor preferir a trilha auto-gerada
-(`kind: "asr"`) mesmo quando uma trilha manual também está
-presente. Sem `--asr`, o provedor escolhe a trilha manual
-quando disponível e só cai para ASR quando nada mais existir.
-A flag `--no-fallback` restringe a cadeia ao provedor escolhido
-para que um único upstream mal-comportado não mascare o
-comportamento real dos outros.
+Patches anti-fingerprint em `src/provider/stealth.rs` mascaram
+`navigator.webdriver`, populam `navigator.plugins`, sobrescrevem
+`navigator.languages`, trocam o vendor WebGL de `SwiftShader`
+para `Intel Inc.`, e mockam `window.chrome.runtime`.
 
 ### Seleção de provedor
 
-`--provider` aceita os valores na tabela abaixo. `auto` é o
-padrão e a escolha recomendada para pipelines de produção. A
-ordem da cadeia em modo `auto` é `youtube-direct` depois
-`provider_a` depois `provider_b`; `provider_headless` só entra
-na cadeia quando o binário foi compilado com a feature `headless`.
-
 | Valor | Efeito |
 |-------|--------|
-| `auto` | Tenta `youtube-direct` primeiro, depois `provider_a`, depois `provider_b`, depois o headless se habilitado. |
-| `youtube-direct` | Apenas o provedor YouTube-direct. Desabilita todos os outros provedores para a execução. |
-| `provider_a` | Apenas `provider_a`. Reproduz a cadeia padrão de v0.2.x. |
-| `provider_b` | Apenas `provider_b`. Reproduz o caminho alternativo de v0.2.x. |
-| `provider_headless` | Apenas o provedor headless. Requer `--features headless` em build time. |
+| `auto` | Usa `provider-noteey` (padrão) |
+| `provider-noteey` | Seleção explícita do provedor noteey |
 
-As flags `--provider` e `--asr` se compõem: `--asr` se propaga
-para o provedor escolhido, que decide se prefere a trilha
-auto-gerada. `--asr --provider provider-a` é rejeitado com exit
-code `64` (`EX_USAGE`) porque os provedores terceirizados não
-expoem uma seleção manual-versus-ASR.
+```bash
+# Padrão — auto seleciona provider-noteey
+youtube-legend-cli "https://youtu.be/dQw4w9WgXcQ"
+
+# Seleção explícita de provedor
+youtube-legend-cli --provider provider-noteey "https://youtu.be/dQw4w9WgXcQ"
+```
 
 
 Três micro-benchmarks vivem em `benches/cache_bench.rs`:

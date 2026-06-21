@@ -33,7 +33,7 @@ Idiomas: [Inglês](docs/AGENTS.md) | [Português Brasileiro](docs/AGENTS.pt-BR.m
 
 ## Arquitetura em um Relance
 
-Uma única struct `Cli` derivada de `clap` captura as 17 flags. `commands::run` despacha para `extract::run` quando é uma URL única ou para `batch::run` para listas vindas do `stdin`. A cadeia de provedores percorre `youtube-direct`, depois `provider_a`, depois `provider_b` (e `provider_headless` quando a feature `headless` está habilitada), limitada a uma requisição por segundo, envolta em `retry::retry_with_backoff` com três tentativas em 1 s, 2 s, 4 s. A camada de cache grava toda busca bem-sucedida em disco. A camada de saída escreve texto puro, SRT ou o envelope JSON no `stdout`; logs e progresso vão para o `stderr`.
+Uma única struct `Cli` derivada de `clap` captura as flags da CLI. `commands::run` despacha para `extract::run` quando é uma URL única ou para `batch::run` para listas vindas do `stdin`. A cadeia de provedores usa `provider-noteey` exclusivamente (Chromium headless via `chromiumoxide 0.9.1`), com `BrowserFetcher` baixando automaticamente Chromium r1585606. Patches anti-fingerprint em `stealth.rs` mascaram sinais de automação do browser. A camada de cache grava toda busca bem-sucedida em disco. A camada de saída escreve texto puro ou o envelope JSON no `stdout`; logs e progresso vão para o `stderr`.
 
 
 ## Flags da CLI
@@ -48,7 +48,7 @@ Uma única struct `Cli` derivada de `clap` captura as 17 flags. `commands::run` 
 
 - Não hardcode o hostname do provedor no código do agente. A cadeia de provedores é o contrato público; os hostnames estão no `.gitignore` e podem mudar sem aviso.
 - Não parseie `stderr`. Logs são legíveis por humanos e podem incluir spans de tracing; os dados estruturados vivem no `stdout` quando `--json` está ativo.
-- Não use o provedor `headless` sem a feature flag `headless`. O binário se recusa a invocar Chromium sem o portão da feature em build time.
+- Não contorne a cadeia `provider-noteey`. É o único provedor desde v0.3.2.
 
 ### Padrão Correto
 
@@ -60,34 +60,43 @@ youtube-legend-cli --json "https://youtu.be/dQw4w9WgXcQ" \
 Descubra todas as flags com `youtube-legend-cli --help`. A tabela completa vive no `README.md` do projeto.
 
 
-## Modo Headless (v0.3.1+)
+## Provedor (v0.3.2)
 
-### Problema
-- Os providers HTTP puros (`youtube-direct`, `provider-a`,
-  `provider-b`) recebem HTTP 400 do YouTube e HTTP 429 do Cloudflare
-  quando chamados de IP de datacenter
-- Operadores downstream precisam de um caminho que dirija um
-  browser real para o Cloudflare resolver o challenge JavaScript
+Desde v0.3.2, a CLI usa um único provedor: `provider-noteey`.
+Ele dirige Chromium headless via `chromiumoxide 0.9.1` para extrair
+transcripts do noteey.com.
 
 ### Padrão Correto
-- Instale o binário com a feature `headless`:
-  `cargo install youtube-legend-cli --version 0.3.1 --features headless`
-- Invoque com `--headless` para forçar o fallback headless:
-  `youtube-legend-cli --headless "https://youtu.be/dQw4w9WgXcQ"`
+- Instale: `cargo install youtube-legend-cli`
+- Execute: `youtube-legend-cli "https://youtu.be/dQw4w9WgXcQ"`
 - Defina `$CHROME=/caminho/para/chrome` para sobrescrever a busca
   do executável
-- `BrowserFetcher` baixa automaticamente um Chromium portátil para
-  `$XDG_CACHE_HOME/youtube-legend-cli/browser/` quando não há
-  Chrome local
+- `BrowserFetcher` baixa automaticamente Chromium r1585606 em
+  `~/.cache/youtube-legend-cli/browser/` quando não há Chrome local
 - `$YT_LEGEND_NO_NETWORK=1` desvia o provider sem spawnar browser
   (retorna `AppError::ProviderUnavailable`)
+- `--provider` aceita apenas `auto` (padrão) e `provider-noteey`
 
-### Códigos de Saída para Falhas do Headless
-- 66 (EX_NOINPUT) — nenhuma trilha no idioma após Cloudflare
-  resolver o challenge
-- 69 (EX_UNAVAILABLE) — Chrome/Chromium ausente E download
-  automático falhou, OU `$YT_LEGEND_NO_NETWORK` definido
+### Códigos de Saída para Falhas do Provedor
+- 66 (EX_NOINPUT) — nenhum transcript encontrado para o vídeo
+- 69 (EX_UNAVAILABLE) — Chrome/Chromium ausente (`BrowserNotFound`),
+  CAPTCHA detectado (`CaptchaChallenge`), rate limited, ou
+  `$YT_LEGEND_NO_NETWORK` definido
 - 70 (EX_SOFTWARE) — timeout de 60 segundos de navegação excedido
+
+### Códigos de Saída para Erros de Configuração
+- 78 (EX_CONFIG) — `--config /tmp/bad.toml` está ausente, ilegível
+  ou contém TOML malformado ou chave desconhecida. Distinto de 64
+  (EX_USAGE), reservado para falhas de validação pós-parse de
+  argumentos CLI.
+
+### Códigos de Saída para Rejeição do Parser clap
+- 2 (rejeição do parser clap) — flag inválida como `--lang xx`
+  sai via `clap::Error::exit()` antes de alcançar `AppError`. Este
+  é o comportamento canônico do clap conforme
+  `rules-rust-cli-stdin-stdout-clap-exitcodes-erros` e é
+  intencionalmente distinto de 64 (`AppError::InvalidUsage` para
+  falhas de validação pós-parse).
 
 ## Envelope JSON
 
@@ -105,12 +114,12 @@ Descubra todas as flags com `youtube-legend-cli --help`. A tabela completa vive 
 
 ```json
 {
-  "provider": "youtube-direct",
+  "provider": "provider-noteey",
   "video_id": "dQw4w9WgXcQ",
   "language": "en",
   "format": "txt",
   "byte_size": 1452,
-  "source_url": "https://www.youtube.com/api/timedtext...",
+  "source_url": "https://noteey.com/...",
   "body": "...",
   "error": null
 }
@@ -121,22 +130,22 @@ Descubra todas as flags com `youtube-legend-cli --help`. A tabela completa vive 
 
 ### OBRIGATÓRIO
 
-- Deixe a cadeia fazer fallback automático. A política `auto` tenta `youtube-direct` primeiro, depois `provider_a`, depois `provider_b` (e `provider_headless` se o binário foi compilado com a feature).
-- Honre `--asr` quando o requisitante quer a trilha auto-gerada mesmo quando existe uma trilha manual.
+- Use `--provider auto` (padrão) ou `--provider provider-noteey`. Estes são os únicos valores válidos desde v0.3.2.
+- Garanta que Chromium/Chrome esteja disponível ou deixe o `BrowserFetcher` baixar automaticamente.
 
 ### PROIBIDO
 
-- Não fixe um único provedor em CI de produção. O ponto da cadeia é degradação graciosa quando um upstream está degradado.
-- Não combine `--asr` com `provider_a` ou `provider_b`. Os provedores terceiros não expõem seleção manual versus ASR; a CLI rejeita a combinação com código de saída `64`.
+- Não use `--provider youtube-direct`, `--provider provider-a`, `--provider provider-b`, ou `--provider provider-headless`. Estes foram removidos na v0.3.2 e produzem exit 2.
+- Não use `--asr` ou `--no-fallback`. Estas flags foram removidas na v0.3.2.
 
 ### Padrão Correto
 
 ```bash
-# Produção: deixa a cadeia fazer fallback automático
+# Produção: auto seleciona provider-noteey
 youtube-legend-cli --provider auto "https://youtu.be/VIDEO"
 
-# Debug: fixa um provedor e desabilita fallback
-youtube-legend-cli --provider youtube-direct --no-fallback "https://youtu.be/VIDEO"
+# Seleção explícita de provedor
+youtube-legend-cli --provider provider-noteey "https://youtu.be/VIDEO"
 ```
 
 
@@ -144,13 +153,13 @@ youtube-legend-cli --provider youtube-direct --no-fallback "https://youtu.be/VID
 
 ### OBRIGATÓRIO
 
-- Ramifique pela categoria do BSD `sysexits.h`. `0` é sucesso, `64` é erro de uso, `65` é erro de dados, `66` é sem entrada, `69` é indisponível, `70` é erro de software, `78` é erro de configuração, `130` é sinal.
+- Ramifique pela categoria do BSD `sysexits.h`. `0` é sucesso, `2` é rejeição do parser clap, `64` é erro de uso, `65` é erro de dados, `66` é sem entrada, `69` é indisponível, `70` é erro de software, `78` é erro de configuração, `130` é sinal.
 - Use `AppError::exit_code()` quando consumir a API Rust diretamente. O mapeamento é a mesma tabela.
 
 ### PROIBIDO
 
 - Não hardcode inteiros brutos em scripts de CI. Mapeie por nome de categoria no seu dispatcher de shell.
-- Não trate `69` como erro fatal. Significa que o upstream estava indisponível; tente de novo com backoff e provedor diferente.
+- Não trate `69` como erro fatal. Significa que o upstream estava indisponível; tente de novo com backoff.
 
 ### Padrão Correto
 
@@ -207,25 +216,9 @@ youtube-legend-cli --no-cache "https://youtu.be/VIDEO"
 ```bash
 # A CLI trata Retry-After internamente
 youtube-legend-cli "https://youtu.be/VIDEO"
-## Capacidades do Provider YouTube Direct (v0.3.0)
+```
 
-Agentes que consomem a CLI podem agora:
-
-- Passar `--provider youtube-direct` para forçar o provider nativo.
-- Confiar em legendas auto-geradas (ASR) sem fallback para third-party.
-- Receber SRT canônico do YouTube (Srv3/Json3 convertidos localmente).
-- Diagnosticar com `youtube-direct-probe <video-id>` (binário de probe).
-
-## Comportamento de Erros (v0.3.0)
-
-Novas variantes em `AppError`:
-
-- `SignatureDecipherFailed(String)`: exit 70 (`EX_SOFTWARE`).
-- `PlayerResponseMissing(String)`: exit 70.
-- `CaptionTrackNotFound`: exit 70.
-- `TimedtextUpstreamError(String)`: exit 70.
-
-
+```rust
 # Inspecione o Retry-After parseado ao consumir a API Rust
 match err {
     AppError::RateLimited { retry_after_secs } => sleep(Duration::from_secs(retry_after_secs.unwrap_or(60))),

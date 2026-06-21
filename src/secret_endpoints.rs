@@ -23,49 +23,18 @@
 //! O `Sigilo gate` no job CI `public-api` valida a invariante em
 //! todo PR.
 
-#[doc(hidden)]
-pub(crate) const PROVIDER_A_PRIMARY_HOST: &str = "downsub.com";
-#[doc(hidden)]
-pub(crate) const PROVIDER_A_PRIMARY_PAGE: &str = "https://downsub.com/?url=";
-#[doc(hidden)]
-pub(crate) const PROVIDER_A_INFO_BASE: &str = "https://get-info.downsub.com/";
-#[doc(hidden)]
-#[allow(dead_code)]
-pub(crate) const PROVIDER_A_SUBTITLE_BASE: &str = "https://subtitle.downsub.com/";
-
-#[doc(hidden)]
-pub(crate) const PROVIDER_B_PRIMARY_HOST: &str = "www.downloadyoutubesubtitles.com";
-#[doc(hidden)]
-pub(crate) const PROVIDER_B_PRIMARY_PAGE: &str = "https://www.downloadyoutubesubtitles.com/?u=";
-#[doc(hidden)]
-pub(crate) const PROVIDER_B_API_PATH: &str = "/api.php";
-
+// GAP-AUD-2026-038: noteey.com is the exclusive provider since v0.3.2.
+// The noteey homepage hosts a vanilla Vue form (URL input + Get
+// Subtitle button + transcript pane). Headless extraction is the
+// user-mandated path; a parallel JSON API exists but is not used by
+// this provider (see GAP-AUD-2026-043 in gaps.md for the future HTTP
+// shortcut).
+//
+// The constants are `#[allow(dead_code)]` so the `snapshot` binary
+// (which builds without the `headless` feature) compiles cleanly.
 #[doc(hidden)]
 #[allow(dead_code)]
-pub(crate) const PROVIDER_B_REDIRECT_HOST: &str = "mywatchtones.com";
-
+pub(crate) const NOTEEY_PRIMARY_HOST: &str = "www.noteey.com";
 #[doc(hidden)]
 #[allow(dead_code)]
-pub(crate) const OBFUSCATED_PASSWORD: &[u8] = b"Hnbdi4Nb6UYF3klv7Pma8Ze02jxt23us";
-
-#[doc(hidden)]
-pub(crate) const USER_AGENT_IDENTITY: &str =
-    concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
-
-#[doc(hidden)]
-#[allow(dead_code)]
-pub(crate) const COOKIE_ANTI_BOT_NAME: &str = "dysDedector";
-
-/// Base URL for a YouTube `watch` page. The video id is appended
-/// verbatim (the format already includes the `?`).
-#[doc(hidden)]
-#[allow(dead_code)]
-pub(crate) const YOUTUBE_WATCH_URL_BASE: &str = "https://www.youtube.com/watch?v=";
-
-/// Base URL for a YouTube `player.js` blob. The version segment is
-/// appended verbatim followed by `/player_ias.vflset/en_US/base.js`.
-///
-/// Example: `https://www.youtube.com/s/player/12345678/player_ias.vflset/en_US/base.js`.
-#[doc(hidden)]
-#[allow(dead_code)]
-pub(crate) const YOUTUBE_PLAYER_URL_BASE: &str = "https://www.youtube.com/s/player/";
+pub(crate) const NOTEEY_PRIMARY_PAGE: &str = "https://www.noteey.com/youtube-subtitle-downloader";

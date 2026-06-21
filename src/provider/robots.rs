@@ -70,7 +70,32 @@ async fn fetch_robots(host: &str) -> String {
     let url = robots_url(host);
     let body = match client().get(&url).send().await {
         Ok(resp) if resp.status().is_success() => resp.text().await.unwrap_or_default(),
-        Ok(_) => String::new(),
+        // GAP-E2E-027: previously the non-success branch was silent
+        // (`Ok(_) => String::new()`), so operators could not tell
+        // whether robots.txt returned 404 (definitive, fail-open is
+        // correct) or 503 (transient, the upstream may recover).
+        // Distinguish the two: 5xx is logged at warn level because
+        // the behaviour may change, 4xx is logged at debug level
+        // because the response is definitive.
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            if status >= 500 {
+                tracing::warn!(
+                    target: "events",
+                    host,
+                    status,
+                    "robots.txt returned server error; failing open (transient)"
+                );
+            } else {
+                tracing::debug!(
+                    target: "events",
+                    host,
+                    status,
+                    "robots.txt returned client error; failing open (definitive)"
+                );
+            }
+            String::new()
+        }
         Err(e) => {
             tracing::warn!(
                 target: "events",
@@ -210,5 +235,49 @@ mod tests {
             .insert(host.clone(), String::new());
         let result = check_allowed(&host, "/anything", "test-ua").await;
         assert!(result.is_ok(), "empty robots body must fail open");
+    }
+
+    // GAP-E2E-027: when the helper detects a non-success status
+    // (5xx or 4xx), the production code must still fail open (return
+    // an empty body so check_allowed falls through to Ok). The
+    // exact log level (warn vs debug) is verified by reading the
+    // source: warn for 5xx, debug for 4xx. This contract test
+    // pins the source so a future refactor cannot silently
+    // downgrade the diagnostic or change the fail-open semantics.
+    #[test]
+    fn fetch_robots_non_success_source_contract() {
+        let source = include_str!("robots.rs");
+        assert!(
+            source.contains("status >= 500")
+                && source.contains("tracing::warn!")
+                && source.contains("tracing::debug!"),
+            "non-success branch must distinguish 5xx (warn) from 4xx (debug)"
+        );
+    }
+
+    // GAP-E2E-027: the matcher must not raise the log level to
+    // info for any non-success status. The contract is warn for 5xx
+    // (transient) and debug for 4xx (definitive). Anything higher
+    // (info) would pollute stderr under --log-level info.
+    #[test]
+    fn fetch_robots_non_success_no_info_logs() {
+        let source = include_str!("robots.rs");
+        // Find the Ok(resp) non-success branch and assert it does
+        // not contain a tracing::info! call. A quick text search
+        // between the branch opener and the closing brace of the
+        // match is sufficient — the production code uses warn and
+        // debug only.
+        let branch_start = source
+            .find("Ok(resp) =>")
+            .expect("non-success branch exists");
+        let branch_end = source[branch_start..]
+            .find('}')
+            .map(|i| branch_start + i)
+            .expect("branch closes");
+        let branch = &source[branch_start..branch_end];
+        assert!(
+            !branch.contains("tracing::info!"),
+            "non-success branch must not log at info level, got:\n{branch}"
+        );
     }
 }
