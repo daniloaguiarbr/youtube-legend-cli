@@ -6,6 +6,23 @@ All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-06-23
+
+### Fixed
+- **GAP-AUD-2026-060**: JSON error envelope now emitted to stdout for pre-fetch validation errors when `--json` is active; previously stdout was empty
+- **GAP-AUD-2026-061**: added `language_detected: false` field to the JSON success envelope signaling that the language reflects the requested locale, not a detected one
+- **GAP-AUD-2026-062**: `>>` speaker-change markers from interview transcripts now stripped by `noteey_to_text` parser
+- **GAP-AUD-2026-063**: documentation in `docs/AGENTS.md` and `docs/AGENTS.pt-BR.md` updated to use `.content` (was `.body`) matching the actual JSON envelope
+- **GAP-AUD-2026-064**: duplicate stderr line for invalid URL errors eliminated (side effect of GAP-060 fix)
+- **GAP-AUD-2026-065**: `byte_size` in JSON envelope now reflects the cleaned NFC content length, not the raw HTML body size
+- **GAP-AUD-2026-066**: `--verbose` flag now works; previously it was a dead flag with no effect on logging output
+- **GAP-AUD-2026-067**: stderr kill-signal noise from Chromium cleanup eliminated via `std::mem::forget(browser)` pattern
+- **GAP-AUD-2026-068**: `--format srt` limitation with `provider-noteey` now documented in the `--help` text
+- **GAP-AUD-2026-069**: batch `--json` output now emits proper NDJSON (newline-terminated); previously concatenated envelopes as `}{` breaking parsers like `jq`
+
+### Changed
+- Documentation audit: `llms.txt`, `llms-full.txt`, `COOKBOOK.md`, `INTEGRATIONS.md` and their PT-BR counterparts updated to reflect the v0.3.2 provider consolidation (removed stale references to `ProviderA`, `ProviderB`, `ProviderHeadless`, `youtube-direct`, `--asr`, `--no-fallback`)
+
 ## [0.3.2] - 2026-06-21
 
 ### Breaking
@@ -222,6 +239,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Implementation plan in 8 phases.
 - 4 corpus URLs in `tests/fixtures/corpus.txt`.
 
+[0.3.3]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.9...v0.3.0
 [0.2.8]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.6...v0.2.7

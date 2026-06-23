@@ -4,7 +4,7 @@
 
 [![docs.rs](https://docs.rs/youtube-legend-cli/badge.svg)](https://docs.rs/youtube-legend-cli)
 [![Crates.io](https://img.shields.io/crates/v/youtube-legend-cli.svg)](https://crates.io/crates/youtube-legend-cli)
-[![v0.3.2](https://img.shields.io/badge/release-v0.3.2-blue.svg)](CHANGELOG.md)
+[![v0.3.3](https://img.shields.io/badge/release-v0.3.3-blue.svg)](CHANGELOG.md)
 [![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/youtube-legend-cli.svg)](LICENSE)
 [![MSRV 1.88.0](https://img.shields.io/badge/MSRV-1.88.0-blue.svg)](rust-toolchain.toml)
 [![CI](https://github.com/daniloaguiarbr/youtube-legend-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/daniloaguiarbr/youtube-legend-cli/actions/workflows/ci.yml)
@@ -64,7 +64,7 @@ youtube-legend-cli --lang pt "https://youtu.be/NvZ4VZ5hooY"
 # Uma URL, saída em texto puro
 youtube-legend-cli "https://youtu.be/dQw4w9WgXcQ" > legenda.txt
 
-# Preservar timestamps SRT
+# Preservar timestamps SRT (indisponível com provider-noteey; use --format txt)
 youtube-legend-cli --format srt "https://youtu.be/dQw4w9WgXcQ" > legenda.srt
 
 # Português brasileiro

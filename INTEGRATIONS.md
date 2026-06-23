@@ -28,10 +28,10 @@ tool call.
 
 ```bash
 youtube-legend-cli --json "https://youtu.be/NvZ4VZ5hooY" \
-  | jq '.body'
+  | jq '.content'
 ```
 
-The companion `snapshot` binary probes both providers in isolation
+The companion `snapshot` binary probes the provider in isolation
 and is the harness Claude Code uses when verifying that the v0.2.x
 provider chain still returns clean subtitle bodies.
 
@@ -49,7 +49,7 @@ response shape.
     youtube-legend-cli --json "${{ inputs.url }}" > subtitle.json
 - name: Verify body length
   run: |
-    body_len=$(jq '.body | length' subtitle.json)
+    body_len=$(jq '.content | length' subtitle.json)
     test "$body_len" -gt 0
 ```
 
@@ -80,8 +80,8 @@ recommended pattern is to set `--quiet` so the agent transcript
 stays clean while the subtitle body still arrives on `stdout`.
 
 ```bash
-youtube-legend-cli --quiet --format srt \
-  "https://youtu.be/NvZ4VZ5hooY" > subtitle.srt
+youtube-legend-cli --quiet \
+  "https://youtu.be/NvZ4VZ5hooY" > subtitle.txt
 ```
 
 ### Codex
@@ -125,7 +125,7 @@ relevant to integration authors.
 | v0.2.7 | — | No new flags. The release fixed the crates.io category slug. |
 | v0.2.8 | — | No new flags. The release exposed `secret_endpoints.rs` to the source tree. |
 | v0.2.9 | — | No new flags. The release lowered the MSRV to 1.88.0 in `rust-version`. |
-| v0.3.0 | `--provider`, `--asr`, `--no-fallback` | Lands the YouTube-direct provider. `--provider` accepts `auto` (default), `youtube-direct`, `provider_a`, `provider_b`, or `provider_headless`. `--asr` is rejected with `EX_USAGE` when combined with `provider_a` or `provider_b`. |
+| v0.3.0 | `--provider` | Lands the provider selection flag. Since v0.3.2, `--provider` accepts only `auto` (default) and `provider-noteey`. |
 
 ## Summary Table
 
@@ -153,9 +153,7 @@ description of the consumer-visible effect.
 | `--user-agent` | — | crate name | Override the default User-Agent. |
 | `--cache-ttl` | — | `24` | Cache TTL in hours. |
 | `--no-cache` | — | `false` | Skip cache reads. |
-| `--provider` | — | `auto` | v0.3.0+. `auto`, `youtube-direct`, `provider_a`, `provider_b`, `provider_headless`. |
-| `--asr` | — | `false` | v0.3.0+. Prefer the auto-generated caption track. |
-| `--no-fallback` | — | `false` | v0.3.0+. Restrict the chain to the chosen provider. |
+| `--provider` | — | `auto` | v0.3.0+. `auto` or `provider-noteey` (since v0.3.2). |
 
 The exit-code table follows the BSD `sysexits.h` convention so any
 POSIX-aware orchestrator can branch on category without parsing the

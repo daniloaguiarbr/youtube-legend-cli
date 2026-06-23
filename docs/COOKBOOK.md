@@ -1,4 +1,3 @@
-[English](COOKBOOK.md) | [Português Brasileiro](COOKBOOK.pt-BR.md)
 # COOKBOOK
 
 > Practical recipes for driving the subtitle CLI from a shell, a CI runner, or a Python pipeline.
@@ -7,7 +6,7 @@ Languages: [English](docs/COOKBOOK.md) | [Português Brasileiro](docs/COOKBOOK.p
 
 ## Latency Note
 
-The cache layer lives at `~/.cache/youtube-legend-cli/`. On a warm cache the body is served from disk in roughly one millisecond. On a cold cache the latency is dominated by the upstream HTTP round-trip plus throttling: `youtube-direct` averages 800 ms to 1.5 s end-to-end on a typical residential connection, `provider_a` averages 1.5 s to 3 s, and `provider_b` averages 2 s to 4 s because of the AES-256-CBC plus PBKDF2 token signing round-trip. The one-request-per-second throttle is per chain, not per provider, so back-to-back downloads on a cold cache pay the throttle cost on every call.
+The cache layer lives at `~/.cache/youtube-legend-cli/`. On a warm cache the body is served from disk in roughly one millisecond. On a cold cache the latency is dominated by the headless Chromium startup and page navigation: `provider-noteey` averages 15 s to 30 s end-to-end on a cold browser launch, and 5 s to 10 s on subsequent calls when the browser profile is warm.
 
 ## Default Values Reference
 
@@ -30,8 +29,6 @@ The cache layer lives at `~/.cache/youtube-legend-cli/`. On a warm cache the bod
 | Dry run (cache only) | off | `--dry-run` |
 | Assume yes for prompts | off | `--yes` |
 | Provider | `auto` | `--provider` |
-| Prefer ASR track | off | `--asr` |
-| Disable fallback chain | off | `--no-fallback` |
 
 
 ## How To download subtitles for one video
@@ -72,7 +69,7 @@ cat batch.log
 
 ## How To parse the JSON envelope in Python
 
-PROBLEM: A pipeline needs the structured fields (`video_id`, `language`, `byte_size`, `body`) without writing a regex.
+PROBLEM: A pipeline needs the structured fields (`video_id`, `language`, `byte_size`, `content`) without writing a regex.
 
 SOLUTION: Use `--json` to make the CLI emit a one-line JSON envelope, then parse it with `json.loads`.
 
@@ -87,9 +84,9 @@ result = subprocess.run(
     check=False,
 )
 envelope = json.loads(result.stdout)
-if envelope.get("error"):
-    raise SystemExit(f"provider error: {envelope['error']}")
-print(envelope["body"])
+if "error" in envelope and envelope["error"]:
+    raise SystemExit(f"provider error: {envelope['message']}")
+print(envelope["content"])
 ```
 
 VERIFY: The script prints the transcript to `stdout` and exits with code `0`. If the upstream is unavailable, `envelope["error"]` is a structured object and the script exits non-zero.
@@ -99,14 +96,14 @@ VERIFY: The script prints the transcript to `stdout` and exits with code `0`. If
 
 PROBLEM: CI runs need a deterministic provider to avoid flakes when one upstream is degraded.
 
-SOLUTION: Pass `--provider` to pin a single provider, and pass `--no-fallback` to disable the chain. The CLI exits with `69` if the pinned provider fails instead of trying the next one.
+SOLUTION: Since v0.3.2 the CLI uses a single provider (`provider-noteey`). Pass `--provider provider-noteey` explicitly if you want to document the choice in CI. The CLI exits with `69` if the provider fails.
 
 ```bash
-youtube-legend-cli --provider youtube-direct --no-fallback \
+youtube-legend-cli --provider provider-noteey \
   "https://youtu.be/dQw4w9WgXcQ" > subtitle.txt
 ```
 
-VERIFY: The exit code is `0` on success, `69` on upstream unavailability, never `0` from a different provider than the one you pinned.
+VERIFY: The exit code is `0` on success, `69` on upstream unavailability.
 
 
 ## How To override cache TTL
@@ -170,14 +167,14 @@ grep '"event":"http_response"' trace.log | tail
 
 PROBLEM: A CI job needs to download subtitles for a fixed list of videos and fail the build if any video is missing a transcript.
 
-SOLUTION: Combine `--json`, `--no-fallback` for determinism, and a shell loop that checks the exit code per URL.
+SOLUTION: Combine `--json` and `--provider provider-noteey` for determinism, and a shell loop that checks the exit code per URL.
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 while IFS= read -r url; do
-  if ! youtube-legend-cli --json --no-fallback --provider youtube-direct "$url" \
+  if ! youtube-legend-cli --json --provider provider-noteey "$url" \
        > "out/$(echo "$url" | sed 's|.*/||;s|?.*||').json" 2> "logs/$(date +%s).log"; then
     echo "CI failure on $url" >&2
     exit 1
@@ -188,49 +185,22 @@ done < urls.txt
 VERIFY: The job exits with code `0` when every URL produced a JSON envelope, exits with the CLI's code (`64`/`65`/`66`/`69`/`70`) when one URL failed, and the `out/` directory contains one JSON file per video.
 
 
-## How To force the YouTube direct provider
+## How To use provider-noteey explicitly
 
-PROBLEM: Third-party providers do not index the video, but it
-has public captions on YouTube.
+PROBLEM: You want to document the provider choice in your pipeline script.
 
-SOLUTION: Pass `--provider youtube-direct` to pin the native
-provider and skip the fallback chain. The CLI then talks to
-YouTube's public endpoint and emits a clean SRT.
+SOLUTION: Pass `--provider provider-noteey` to pin the provider explicitly. Since v0.3.2 this is the only provider, so `auto` resolves to the same path.
 
 ```bash
-youtube-legend-cli --provider youtube-direct \
-  --language pt-BR \
-  "https://youtu.be/<id>" > subtitle.srt
+youtube-legend-cli --provider provider-noteey \
+  --lang pt \
+  "https://youtu.be/<id>" > subtitle.txt
 ```
 
-VERIFY: The SRT has YouTube-canonical timing cues, no
-provider watermark, and the envelope's `provider` field reads
-`youtube-direct`.
+VERIFY: The output is a clean transcript and the JSON envelope's `provider` field reads `provider-noteey`.
 
 ```bash
-head -n 3 subtitle.srt
-youtube-legend-cli --json "https://youtu.be/<id>" | jq -r .provider
-```
-
-
-## How To diagnose a player.js failure
-
-PROBLEM: The video is signature-protected and the decipher
-step fails. You need a structured diagnostic before retrying.
-
-SOLUTION: Use the `youtube-direct-probe` companion binary.
-It inspects the cached `base.js`, runs the decipher on a
-synthetic signature, and prints a JSON report.
-
-```bash
-youtube-direct-probe <video-id>
-```
-
-VERIFY: The probe prints one JSON object per line with
-`signature_status`, `player_js_version`, `cache_hit`, and an
-optional `decipher_error` field on failure.
-
-```bash
-youtube-direct-probe <video-id> | jq -r '.signature_status'
+youtube-legend-cli --json --provider provider-noteey "https://youtu.be/<id>" \
+  | jq -r .provider
 ```
 

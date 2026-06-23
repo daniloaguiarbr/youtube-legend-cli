@@ -75,7 +75,6 @@ pub async fn run(cli: &Cli, chain: &ProviderChain) -> AppResult<ExitCode> {
             if let Ok(path) = cache::cache_path(&video_id, lang, format.extension(), cache_ttl) {
                 match cache::read_cache_with_hint(&path, cache_ttl).await {
                     Ok(Some((bytes, format_hint))) => {
-                        let bytes_len = bytes.len() as u64;
                         let duration_ms = started.elapsed().as_millis() as u64;
                         // GAP-AUD-2026-051: cache hits now honour the
                         // stored format_hint instead of hard-coding Srt.
@@ -89,7 +88,6 @@ pub async fn run(cli: &Cli, chain: &ProviderChain) -> AppResult<ExitCode> {
                                     &video_id,
                                     &converted,
                                     "cache",
-                                    bytes_len,
                                     duration_ms,
                                 )
                                 .await?;
@@ -134,7 +132,8 @@ pub async fn run(cli: &Cli, chain: &ProviderChain) -> AppResult<ExitCode> {
                         // GAP-AUD-2026-051: persist the format_hint
                         // sidecar so the next cache hit can route the
                         // body through the right parser (srt vs noteey).
-                        let _ = cache::write_cache_with_hint(&path, &content, info.format_hint).await;
+                        let _ =
+                            cache::write_cache_with_hint(&path, &content, info.format_hint).await;
                     }
                 }
 
@@ -146,7 +145,6 @@ pub async fn run(cli: &Cli, chain: &ProviderChain) -> AppResult<ExitCode> {
                         continue;
                     }
                 };
-                let bytes = content.len() as u64;
                 let duration_ms = started.elapsed().as_millis() as u64;
                 let source = info.source_url.clone();
                 let provider = info.provider;
@@ -159,7 +157,6 @@ pub async fn run(cli: &Cli, chain: &ProviderChain) -> AppResult<ExitCode> {
                     &video_id,
                     &converted,
                     &source,
-                    bytes,
                     duration_ms,
                 )
                 .await
@@ -198,11 +195,10 @@ async fn write_item(
     video_id: &str,
     converted: &str,
     source: &str,
-    bytes: u64,
     duration_ms: u64,
 ) -> AppResult<()> {
     if cli.json {
-        output_success(cli, provider, video_id, converted, source, bytes, duration_ms).await?;
+        output_success(cli, provider, video_id, converted, source, duration_ms).await?;
     } else {
         let separator = if idx > 0 { "\n---\n" } else { "" };
         let mut buf = separator.as_bytes().to_vec();

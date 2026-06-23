@@ -1,4 +1,3 @@
-[English](HOW_TO_USE.md) | [Português Brasileiro](HOW_TO_USE.pt-BR.md)
 # How to Use — youtube-legend-cli
 
 > Run one command, get a clean subtitle file. No daemon, no prompts, no telemetry.
@@ -17,7 +16,7 @@ surface for AI agents and CI is in
 
 - A Unix-like shell on Linux, macOS, or Windows 10/11.
 - Rust 1.88.0 or newer if you plan to build from source.
-- `curl` NÃO é necessário. The CLI talks HTTP itself.
+- `curl` is NOT required. The CLI talks HTTP itself.
 - No Python, no Node, no system services.
 
 ## First Command in 60 Seconds
@@ -59,27 +58,6 @@ head -n 3 subtitle.txt
 ```
 
 ## Core Commands
-## ProviderYouTubeDirect (v0.3.0)
-
-Starting at v0.3.0, the CLI queries YouTube directly as a primary
-provider, with no third-party service in the loop.
-
-### How It Works
-
-- Issues a `GET` to `https://www.youtube.com/watch?v=<id>` with
-  realistic headers.
-- Extracts `ytInitialPlayerResponse` from the returned HTML.
-- Walks `captions.playerCaptionsTracklistRenderer.captionTracks[]`.
-- For each track, resolves `baseUrl` (with decipher when a signature
-  is present).
-- Downloads the Srv3/Json3 payload and converts to SRT locally.
-
-### When To Use
-
-- Videos whose auto-generated captions (ASR) third-party providers
-  do not index.
-- Pipelines that need a consistent hit rate.
-- Environments where depending on external services is undesirable.
 
 The CLI follows a single convention: the subtitle body goes to
 `stdout`, every other diagnostic goes to `stderr`, and `stdin`
@@ -122,11 +100,11 @@ youtube-legend-cli --lang pt_BR.UTF-8 "https://youtu.be/dQw4w9WgXcQ"
 
 ### Custom Format
 
-Switch from plain text to preserved SRT when you need the original
-timing.
+The default format is `txt` (plain text). SRT format is unavailable
+with the current `provider-noteey` (returns exit 64).
 
 ```bash
-youtube-legend-cli --format srt "https://youtu.be/dQw4w9WgXcQ" > subtitle.srt
+youtube-legend-cli --format txt "https://youtu.be/dQw4w9WgXcQ" > subtitle.txt
 ```
 
 ## Configuration
@@ -138,7 +116,7 @@ config file pins the language, the format, and the cache TTL.
 ```toml
 # yt-legend.toml
 lang = "pt-BR"
-format = "srt"
+format = "txt"
 cache_ttl = 48
 verbose = false
 ```
@@ -166,7 +144,7 @@ a subprocess and read two streams can drive the entire workflow.
 
 ```bash
 youtube-legend-cli --json "https://youtu.be/NvZ4VZ5hooY" \
-  | jq -r '.body'
+  | jq -r '.content'
 ```
 
 ### Pattern Two — Quiet Batch Capture
@@ -202,23 +180,13 @@ with `--verbose` to confirm which track the upstream returned.
 
 ### Why does the CLI exit with code 69 on a known video?
 
-Exit code 69 (`EX_UNAVAILABLE`) means the chain tried every
-provider and every one returned a non-recoverable failure. The
-common causes are rate limiting (`HTTP 429` with an exhausted
-`Retry-After`), a `robots.txt` `Disallow`, or an upstream outage.
-Wait a few minutes, then retry with `--no-cache` to bypass any
-stale negative cache.
-
-### How do I bypass a single bad provider?
-
-Starting in v0.3.0, the `--provider` flag pins a specific provider
-and `--no-fallback` disables the rest of the chain. The combination
-isolates a misbehaving upstream.
-
-```bash
-youtube-legend-cli --provider provider_a --no-fallback \
-  "https://youtu.be/dQw4w9WgXcQ"
-```
+Exit code 69 (`EX_UNAVAILABLE`) means the provider returned a
+non-recoverable failure. The common causes are rate limiting
+(`HTTP 429` with an exhausted `Retry-After`), Chrome/Chromium not
+found, a CAPTCHA challenge, or an upstream outage. Wait a few
+minutes, then retry with `--no-cache` to bypass any stale negative
+cache. If Chrome is missing, set `$CHROME` or let `BrowserFetcher`
+auto-download it.
 
 ### Where is the cache stored?
 

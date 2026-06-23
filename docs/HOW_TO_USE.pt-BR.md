@@ -58,27 +58,6 @@ head -n 3 subtitle.txt
 ```
 
 ## Comandos Centrais
-## ProviderYouTubeDirect (v0.3.0)
-
-A partir de v0.3.0, a CLI consulta o YouTube diretamente como
-provedor primário, sem depender de serviços third-party no laço.
-
-### Como Funciona
-
-- Faz `GET` em `https://www.youtube.com/watch?v=<id>` com headers
-  realistas.
-- Extrai `ytInitialPlayerResponse` do HTML retornado.
-- Navega até `captions.playerCaptionsTracklistRenderer.captionTracks[]`.
-- Para cada track, resolve `baseUrl` (com decipher quando há signature).
-- Baixa o payload Srv3/Json3 e converte para SRT localmente.
-
-### Quando Usar
-
-- Vídeos cujas legendas auto-geradas (ASR) provedores third-party
-  não indexam.
-- Pipelines que precisam de taxa de acerto consistente.
-- Ambientes onde depender de serviços externos é indesejável.
-
 
 O CLI segue uma única convenção: o corpo da legenda vai para
 `stdout`, todo outro diagnóstico vai para `stderr`, e `stdin` aceita
@@ -122,11 +101,11 @@ youtube-legend-cli --lang pt_BR.UTF-8 "https://youtu.be/dQw4w9WgXcQ"
 
 ### Formato Customizado
 
-Troque de texto plano para SRT preservado quando você precisa da
-temporização original.
+O formato padrão é `txt` (texto puro). O formato SRT está
+indisponível com o `provider-noteey` atual (retorna exit 64).
 
 ```bash
-youtube-legend-cli --format srt "https://youtu.be/dQw4w9WgXcQ" > subtitle.srt
+youtube-legend-cli --format txt "https://youtu.be/dQw4w9WgXcQ" > subtitle.txt
 ```
 
 ## Configuração
@@ -138,7 +117,7 @@ de config típico fixa o idioma, o formato e o TTL do cache.
 ```toml
 # yt-legend.toml
 lang = "pt-BR"
-format = "srt"
+format = "txt"
 cache_ttl = 48
 verbose = false
 ```
@@ -167,7 +146,7 @@ inteiro.
 
 ```bash
 youtube-legend-cli --json "https://youtu.be/NvZ4VZ5hooY" \
-  | jq -r '.body'
+  | jq -r '.content'
 ```
 
 ### Padrão Dois — Captura de Lote Silenciosa
@@ -204,23 +183,14 @@ retornou.
 
 ### Por que o CLI sai com código 69 em um vídeo conhecido?
 
-O código de saída 69 (`EX_UNAVAILABLE`) significa que a cadeia
-tentou todos os provedores e cada um retornou uma falha não
-recuperável. As causas comuns são rate limiting (`HTTP 429` com
-`Retry-After` esgotado), um `Disallow` em `robots.txt`, ou uma
-quueda do upstream. Aguarde alguns minutos e reexecute com
-`--no-cache` para contornar qualquer cache negativo obsoleto.
-
-### Como faço para contornar um único provedor ruim?
-
-A partir da v0.3.0, a flag `--provider` fixa um provedor
-específico e `--no-fallback` desabilita o resto da cadeia. A
-combinação isola um upstream com mau comportamento.
-
-```bash
-youtube-legend-cli --provider provider_a --no-fallback \
-  "https://youtu.be/dQw4w9WgXcQ"
-```
+O código de saída 69 (`EX_UNAVAILABLE`) significa que o provedor
+retornou uma falha não recuperável. As causas comuns são rate
+limiting (`HTTP 429` com `Retry-After` esgotado), Chrome/Chromium
+não encontrado, um desafio CAPTCHA, ou uma queda do upstream.
+Aguarde alguns minutos e reexecute com `--no-cache` para contornar
+qualquer cache negativo obsoleto. Se o Chrome estiver ausente,
+defina `$CHROME` ou permita que o `BrowserFetcher` o baixe
+automaticamente.
 
 ### Onde o cache fica armazenado?
 

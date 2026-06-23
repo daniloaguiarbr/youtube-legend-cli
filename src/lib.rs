@@ -71,7 +71,6 @@ pub mod cli;
 /// Top-level command dispatch: extract one URL, or batch many.
 pub mod commands;
 
-
 /// Error types and process exit-code table.
 pub mod error;
 

@@ -1,9 +1,60 @@
 [English](MIGRATION.md) | [Português Brasileiro](MIGRATION.pt-BR.md)
 # Migration Guide — youtube-legend-cli
 
-> Move from v0.2.x to v0.3.x with zero surprises.
+> Upgrade notes for every major release.
 
-## What Changes
+## v0.3.3 — Quality and Correctness Fixes
+
+v0.3.3 fixes 10 bugs found during end-to-end audit. No breaking
+changes; all fixes are additive or corrective.
+
+| Fix | Impact |
+|---|---|
+| JSON error envelope for pre-fetch errors (GAP-060) | `--json` now emits structured errors for validation failures |
+| `language_detected` field (GAP-061) | New boolean field in JSON envelope; `false` when provider cannot select language |
+| Speaker marker `>>` cleanup (GAP-062) | Parser removes `>>` prefixes from transcript lines |
+| `byte_size` accuracy (GAP-065) | Now reflects cleaned NFC content size, not raw HTML |
+| `--verbose` flag functional (GAP-066) | Was a dead flag; now enables INFO-level logging |
+| Chromium cleanup noise (GAP-067) | No more `kill signal failed` on stderr |
+| SRT limitation in help (GAP-068) | `--help` documents that SRT is unavailable with provider-noteey |
+| NDJSON batch output (GAP-069) | `--batch --json` now emits newline-terminated JSON objects |
+
+### Migration Steps
+
+1. If you parse `--json` output, add handling for the new
+   `language_detected` boolean field.
+2. If you depend on `byte_size`, note it now matches the
+   `content` field length exactly (previously could differ).
+3. No other changes needed.
+
+## v0.3.2 — Single Provider Consolidation
+
+v0.3.2 removes all providers except `provider-noteey`. This is a
+breaking change for scripts that pin a specific provider.
+
+| Removed | Replacement |
+|---|---|
+| `--provider youtube-direct` | `--provider auto` (resolves to `provider-noteey`) |
+| `--provider provider-a` | `--provider auto` |
+| `--provider provider-b` | `--provider auto` |
+| `--provider provider-headless` | `--provider auto` |
+| `--asr` flag | removed, no replacement |
+| `--no-fallback` flag | removed, no replacement |
+| `--headless` flag | removed, no replacement |
+| `youtube-direct-probe` binary | removed, no replacement |
+
+### Migration Steps
+
+1. Remove any `--provider provider-a`, `--provider provider-b`,
+   `--provider youtube-direct`, or `--provider provider-headless`
+   from your scripts. Use `--provider auto` or omit the flag.
+2. Remove `--asr`, `--no-fallback`, and `--headless` flags.
+3. Ensure Chrome/Chromium is available, or let `BrowserFetcher`
+   auto-download it. Set `$CHROME` to override the binary path.
+4. The JSON envelope field `body` was renamed to `content`.
+   Update any `jq` filters: `.body` → `.content`.
+
+## v0.3.0 — YouTube-Direct Provider
 
 The v0.3.0 release adds a first-class YouTube-direct provider
 and three new flags. The default behaviour for users who never

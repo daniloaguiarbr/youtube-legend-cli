@@ -248,7 +248,6 @@ pub fn default_ttl() -> Duration {
     Duration::from_secs(DEFAULT_TTL_HOURS * 3600)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

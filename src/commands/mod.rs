@@ -18,6 +18,9 @@ struct JsonSuccess {
     provider: &'static str,
     video_id: String,
     language: String,
+    /// GAP-AUD-2026-061: `false` signals that `language` reflects the
+    /// requested locale, not a detected one.
+    language_detected: bool,
     format: String,
     content: String,
     /// GAP-AUD-2026-050: renamed from `bytes` to `byte_size` to match
@@ -58,11 +61,14 @@ struct JsonDryRun {
 /// - All provider / network / cache / IO errors bubble up.
 #[tracing::instrument(level = "debug", err, skip(cli), fields(batch = cli.batch, url = ?cli.url, json = cli.json, verbose = cli.verbose, provider = ?cli.provider))]
 pub async fn run(cli: Cli) -> AppResult<ExitCode> {
-    // GAP-E2E-015: `cli.validate()` now returns `AppResult<()>` so the
-    // `?` propagates `AppError::InvalidUsage` directly. The previous
-    // bridge `if let Err(msg) = cli.validate() { return Err(AppError::InvalidUsage(msg)); }`
-    // is gone.
-    cli.validate()?;
+    // GAP-AUD-2026-060: intercept validation errors so `output_error`
+    // can emit the JSON envelope to stdout when `--json` is active.
+    // The previous bare `?` propagated to `main.rs` which only logged
+    // to stderr, leaving stdout empty for programmatic consumers.
+    if let Err(e) = cli.validate() {
+        output_error(&cli, &e).await.ok();
+        return Ok(ExitCode::from(e.exit_code()));
+    }
 
     let chain = build_provider_chain(&cli);
 
@@ -128,10 +134,8 @@ pub fn convert_format(
 ) -> AppResult<String> {
     match (format, format_hint) {
         // SRT requested and the body is real SubRip — pass through.
-        (Format::Srt, crate::provider::SubtitleFormat::Srt) => {
-            String::from_utf8(content.to_vec())
-                .map_err(|e| AppError::Internal(format!("srt is not valid utf-8: {e}")))
-        }
+        (Format::Srt, crate::provider::SubtitleFormat::Srt) => String::from_utf8(content.to_vec())
+            .map_err(|e| AppError::Internal(format!("srt is not valid utf-8: {e}"))),
         // Txt requested and the body is SRT — convert via srt_to_text.
         (Format::Txt, crate::provider::SubtitleFormat::Srt) => {
             let srt_text = String::from_utf8(content.to_vec())
@@ -147,13 +151,13 @@ pub fn convert_format(
         // SRT requested but the body is noteey-style — reject rather
         // than fabricate SubRip timestamps (noteey does not carry
         // end-of-cue info to produce real SRT).
-        (Format::Srt, crate::provider::SubtitleFormat::NoteeyTranscript) => Err(
-            AppError::InvalidUsage(
+        (Format::Srt, crate::provider::SubtitleFormat::NoteeyTranscript) => {
+            Err(AppError::InvalidUsage(
                 "--format srt is not available when the only source is noteey.com \
                  (transcript has no SRT framing); use --format txt (default)"
                     .to_string(),
-            ),
-        ),
+            ))
+        }
     }
 }
 
@@ -173,7 +177,7 @@ pub fn convert_format(
 ///   `provider-b`, or `cache` for cache hits).
 /// - `video_id`, `language`, `format` — request inputs.
 /// - `content` — the cleaned transcript text (utf-8 NFC).
-/// - `byte_size` — length of `content` in bytes.
+/// - `byte_size` — length of cleaned `content` in bytes (post-parse, post-NFC).
 /// - `duration_ms` — wall-clock time for the fetch (or cache lookup).
 /// - `source_url` — the upstream URL that returned the raw body
 ///   (noteey-prefixed for noteey, youtube timedtext for direct, etc).
@@ -183,24 +187,26 @@ pub async fn output_success(
     video_id: &str,
     content: &str,
     source_url: &str,
-    byte_size: u64,
     duration_ms: u64,
 ) -> AppResult<()> {
+    let nfc = normalize_nfc(content);
     if cli.json {
         let payload = JsonSuccess {
             provider,
             video_id: video_id.to_string(),
             language: language_to_str(cli.lang).to_string(),
+            language_detected: false,
             format: format_to_str(cli.format).to_string(),
-            content: normalize_nfc(content),
-            byte_size,
+            // GAP-AUD-2026-065: byte_size reflects the final NFC content.
+            byte_size: nfc.len() as u64,
+            content: nfc,
             duration_ms,
             source_url: source_url.to_string(),
         };
-        let json = serde_json::to_string(&payload).map_err(AppError::Serde)?;
+        let mut json = serde_json::to_string(&payload).map_err(AppError::Serde)?;
+        json.push('\n');
         crate::io::write_subtitle_to_stdout(json.as_bytes()).await?;
     } else {
-        let nfc = normalize_nfc(content);
         crate::io::write_subtitle_to_stdout(nfc.as_bytes()).await?;
     }
     Ok(())
@@ -225,7 +231,8 @@ pub async fn output_error(cli: &Cli, err: &AppError) -> AppResult<()> {
             code: err.exit_code(),
             message: err.to_string(),
         };
-        if let Ok(json) = serde_json::to_string(&payload) {
+        if let Ok(mut json) = serde_json::to_string(&payload) {
+            json.push('\n');
             let _ = crate::io::write_subtitle_to_stdout(json.as_bytes()).await;
         }
     }
@@ -252,7 +259,8 @@ pub async fn output_dry_run(cli: &Cli, video_id: &str, would_fetch: bool) -> App
             format: format_to_str(cli.format).to_string(),
             would_fetch,
         };
-        if let Ok(json) = serde_json::to_string(&payload) {
+        if let Ok(mut json) = serde_json::to_string(&payload) {
+            json.push('\n');
             crate::io::write_subtitle_to_stdout(json.as_bytes()).await?;
         }
     } else if would_fetch {

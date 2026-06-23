@@ -184,11 +184,12 @@ pub struct Cli {
     )]
     pub lang: LanguageArg,
 
-    /// Output format. `txt` strips SRT timestamps; `srt` preserves them.
+    /// Output format. `txt` strips timestamps; `srt` preserves them
+    /// (srt unavailable with provider-noteey).
     #[arg(
         long,
         value_name = "FORMAT",
-        help = "Output format: txt (plain text) or srt (preserved)",
+        help = "Output format: txt (default) or srt (unavailable with provider-noteey)",
         default_value = "txt"
     )]
     pub format: FormatArg,
@@ -354,11 +355,16 @@ impl Cli {
         })
     }
 
-    /// Resolve the effective log level. Honours `RUST_LOG` when the flag
-    /// is at its default value, so env-driven logging keeps working.
+    /// Resolve the effective log level. Honours `--verbose` and
+    /// `RUST_LOG` when the flag is at its default value.
     pub fn effective_log_level(&self) -> LogLevelArg {
         if self.log_level != LogLevelArg::Warn {
             return self.log_level;
+        }
+        // GAP-AUD-2026-066: --verbose bumps to info when --log-level
+        // was not explicitly set.
+        if self.verbose {
+            return LogLevelArg::Info;
         }
         match std::env::var("RUST_LOG").ok().as_deref() {
             Some("error") => LogLevelArg::Error,

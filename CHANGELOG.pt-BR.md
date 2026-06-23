@@ -2,6 +2,23 @@
 
 [English](CHANGELOG.md) | [Português Brasileiro](CHANGELOG.pt-BR.md)
 
+## [0.3.3] - 2026-06-23
+
+### Corrigido
+- **GAP-AUD-2026-060**: envelope JSON de erro agora emitido no stdout para erros de validação pré-fetch quando `--json` está ativo; anteriormente stdout ficava vazio
+- **GAP-AUD-2026-061**: campo `language_detected: false` adicionado ao envelope JSON de sucesso sinalizando que o idioma reflete o locale solicitado, não um detectado
+- **GAP-AUD-2026-062**: marcadores de troca de falante `>>` de transcripts de entrevista agora removidos pelo parser `noteey_to_text`
+- **GAP-AUD-2026-063**: documentação em `docs/AGENTS.md` e `docs/AGENTS.pt-BR.md` atualizada para usar `.content` (era `.body`) conforme o envelope JSON real
+- **GAP-AUD-2026-064**: linha duplicada no stderr para erros de URL inválida eliminada (efeito colateral do fix GAP-060)
+- **GAP-AUD-2026-065**: `byte_size` no envelope JSON agora reflete o tamanho do content limpo NFC, não o tamanho bruto do body HTML
+- **GAP-AUD-2026-066**: flag `--verbose` agora funciona; anteriormente era uma flag morta sem efeito na saída de log
+- **GAP-AUD-2026-067**: ruído de kill signal do stderr durante cleanup do Chromium eliminado via padrão `std::mem::forget(browser)`
+- **GAP-AUD-2026-068**: limitação de `--format srt` com `provider-noteey` agora documentada no texto de `--help`
+- **GAP-AUD-2026-069**: saída batch `--json` agora emite NDJSON válido (terminado com newline); anteriormente concatenava envelopes como `}{` quebrando parsers como `jq`
+
+### Alterado
+- Auditoria de documentação: `llms.txt`, `llms-full.txt`, `COOKBOOK.md`, `INTEGRATIONS.md` e seus equivalentes PT-BR atualizados para refletir a consolidação de providers da v0.3.2 (removidas referências stale a `ProviderA`, `ProviderB`, `ProviderHeadless`, `youtube-direct`, `--asr`, `--no-fallback`)
+
 ## [0.3.2] - 2026-06-21
 
 ### Quebra
@@ -390,6 +407,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Plano de implementação em 8 fases.
 - 4 URLs de corpus em `tests/fixtures/corpus.txt`.
 
+[0.3.3]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.9...v0.3.0
 [0.2.8]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/daniloaguiarbr/youtube-legend-cli/compare/v0.1.0...v0.2.6

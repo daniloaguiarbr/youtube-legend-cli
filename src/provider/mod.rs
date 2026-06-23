@@ -149,7 +149,11 @@ impl ProviderOutcome {
         } else {
             AppError::ProviderUnavailable
         };
-        ProviderOutcome::ChainError { source, error, degraded }
+        ProviderOutcome::ChainError {
+            source,
+            error,
+            degraded,
+        }
     }
 
     /// Wrap a provider call's error as `ChainError`. Defaults to
@@ -164,7 +168,6 @@ impl ProviderOutcome {
         }
     }
 }
-
 
 /// Subtitle delivery format.
 ///
@@ -399,14 +402,10 @@ impl ProviderChain {
             self.throttle().await;
             let outcome = match provider.fetch_subtitle(video_id, language, format).await {
                 Ok(info) => match provider.fetch_content(&info).await {
-                    Ok(content) if !content.is_empty() => {
-                        ProviderOutcome::Subtitle(info, content)
-                    }
+                    Ok(content) if !content.is_empty() => ProviderOutcome::Subtitle(info, content),
                     Ok(_) => ProviderOutcome::ChainError {
                         source: provider.name(),
-                        error: AppError::NoSubtitle(
-                            crate::error::NoSubtitleReason::NotPublished,
-                        ),
+                        error: AppError::NoSubtitle(crate::error::NoSubtitleReason::NotPublished),
                         // Body fetch returned empty after a successful
                         // `fetch_subtitle` — site reachable, body empty.
                         // This IS the "no captions exist" signal.
@@ -429,10 +428,12 @@ impl ProviderChain {
                         degraded: false,
                     }
                 }
-                Err(e @ (AppError::ProviderUnavailable
-                | AppError::RateLimited { .. }
-                | AppError::CaptchaChallenge { .. }
-                | AppError::BrowserNotFound(_))) => {
+                Err(
+                    e @ (AppError::ProviderUnavailable
+                    | AppError::RateLimited { .. }
+                    | AppError::CaptchaChallenge { .. }
+                    | AppError::BrowserNotFound(_)),
+                ) => {
                     // GAP-AUD-2026-039: upstream-side failures must not
                     // short-circuit the chain. ProviderUnavailable from
                     // a headless site, rate-limit from a static site, or
@@ -475,7 +476,11 @@ impl ProviderChain {
                 ProviderOutcome::Subtitle(info, content) => {
                     return Ok((info, content));
                 }
-                ProviderOutcome::ChainError { source, error, degraded } => {
+                ProviderOutcome::ChainError {
+                    source,
+                    error,
+                    degraded,
+                } => {
                     if degraded {
                         tracing::warn!(
                             target: "events",
@@ -1042,10 +1047,8 @@ mod tests {
 
     #[test]
     fn provider_outcome_chain_error_defaults_to_not_degraded() {
-        let outcome = ProviderOutcome::chain_error(
-            "provider-x",
-            AppError::Internal("synthetic".to_string()),
-        );
+        let outcome =
+            ProviderOutcome::chain_error("provider-x", AppError::Internal("synthetic".to_string()));
         match outcome {
             ProviderOutcome::ChainError {
                 degraded,

@@ -27,10 +27,10 @@ diretamente para a próxima chamada de ferramenta.
 
 ```bash
 youtube-legend-cli --json "https://youtu.be/NvZ4VZ5hooY" \
-  | jq '.body'
+  | jq '.content'
 ```
 
-O binário companheiro `snapshot` sonda ambos os provedores de forma
+O binário companheiro `snapshot` sonda o provedor de forma
 isolada e é o harness que o Claude Code usa para verificar se a
 cadeia de provedores v0.2.x ainda retorna corpos de legenda limpos.
 
@@ -48,7 +48,7 @@ precisa afirmar sobre o formato da resposta.
     youtube-legend-cli --json "${{ inputs.url }}" > subtitle.json
 - name: Verify body length
   run: |
-    body_len=$(jq '.body | length' subtitle.json)
+    body_len=$(jq '.content | length' subtitle.json)
     test "$body_len" -gt 0
 ```
 
@@ -81,8 +81,8 @@ agente permaneça limpo enquanto o corpo da legenda ainda chega em
 `stdout`.
 
 ```bash
-youtube-legend-cli --quiet --format srt \
-  "https://youtu.be/NvZ4VZ5hooY" > subtitle.srt
+youtube-legend-cli --quiet \
+  "https://youtu.be/NvZ4VZ5hooY" > subtitle.txt
 ```
 
 ### Codex
@@ -126,7 +126,7 @@ autores de integração.
 | v0.2.7 | — | Sem novas flags. O release corrigiu o slug de categoria do crates.io. |
 | v0.2.8 | — | Sem novas flags. O release expôs `secret_endpoints.rs` ao source tree. |
 | v0.2.9 | — | Sem novas flags. O release abaixou o MSRV para 1.88.0 em `rust-version`. |
-| v0.3.0 | `--provider`, `--asr`, `--no-fallback` | Entrega o provedor YouTube-direct. `--provider` aceita `auto` (padrão), `youtube-direct`, `provider_a`, `provider_b` ou `provider_headless`. `--asr` é rejeitado com `EX_USAGE` quando combinado com `provider_a` ou `provider_b`. |
+| v0.3.0 | `--provider` | Entrega a flag de seleção de provedor. Desde a v0.3.2, `--provider` aceita apenas `auto` (padrão) e `provider-noteey`. |
 
 ## Tabela Resumo
 
@@ -154,9 +154,7 @@ de uma linha do efeito visível ao consumidor.
 | `--user-agent` | — | nome do crate | Sobrescreve o User-Agent padrão. |
 | `--cache-ttl` | — | `24` | TTL do cache em horas. |
 | `--no-cache` | — | `false` | Pula leituras do cache. |
-| `--provider` | — | `auto` | v0.3.0+. `auto`, `youtube-direct`, `provider_a`, `provider_b`, `provider_headless`. |
-| `--asr` | — | `false` | v0.3.0+. Prefere a trilha de legenda auto-gerada. |
-| `--no-fallback` | — | `false` | v0.3.0+. Restringe a cadeia ao provedor escolhido. |
+| `--provider` | — | `auto` | v0.3.0+. `auto` ou `provider-noteey` (desde v0.3.2). |
 
 A tabela de exit codes segue a convenção BSD `sysexits.h` para que
 qualquer orquestrador POSIX possa ramificar por categoria sem

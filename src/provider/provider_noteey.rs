@@ -232,7 +232,12 @@ impl Provider for ProviderNoteey {
 
         let outcome = drive_page(&browser, video_id).await;
         let _ = browser.close().await;
-        handler_task.abort();
+        // GAP-AUD-2026-067: let Chrome fully exit before dropping
+        // the handler. close() sends the DevTools shutdown command;
+        // forget() prevents Browser::Drop from racing; the handler
+        // wait lets Chrome terminate before Handler::Drop runs.
+        std::mem::forget(browser);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), handler_task).await;
 
         let body = outcome?;
         let source_url = format!("noteey://{video_id}/{lang}/txt");
@@ -283,9 +288,7 @@ async fn drive_page(browser: &Browser, video_id: &str) -> AppResult<String> {
     let page = tokio::time::timeout(HEADLESS_NAV_TIMEOUT, browser.new_page("about:blank"))
         .await
         .map_err(|_| {
-            AppError::Timeout(format!(
-                "noteey new_page exceeded {HEADLESS_NAV_TIMEOUT:?}"
-            ))
+            AppError::Timeout(format!("noteey new_page exceeded {HEADLESS_NAV_TIMEOUT:?}"))
         })?
         .map_err(|e| {
             AppError::BrowserNotFound(format!(
@@ -378,9 +381,9 @@ async fn drive_page(browser: &Browser, video_id: &str) -> AppResult<String> {
     )
     .await
     {
-        Ok(Ok(v)) => v.into_value::<String>().map_err(|e| {
-            AppError::Internal(format!("noteey extract returned non-string: {e}"))
-        })?,
+        Ok(Ok(v)) => v
+            .into_value::<String>()
+            .map_err(|e| AppError::Internal(format!("noteey extract returned non-string: {e}")))?,
         Ok(Err(e)) => {
             if crate::provider::stealth::is_terminal_cdp_error(&e) {
                 // GAP-AUD-2026-045: same treatment as the submit
@@ -401,9 +404,8 @@ async fn drive_page(browser: &Browser, video_id: &str) -> AppResult<String> {
     };
 
     let _ = page.close().await;
-    let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
-        AppError::TimedtextUpstreamError(format!("noteey extract non-JSON: {e}"))
-    })?;
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| AppError::TimedtextUpstreamError(format!("noteey extract non-JSON: {e}")))?;
     if v.get("err").is_some() {
         // GAP-AUD-2026-046: dump first 200 chars of body for diagnosis.
         // The polling JS returns `{err, polled, last_body_len}` but

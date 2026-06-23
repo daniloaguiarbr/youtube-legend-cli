@@ -6,7 +6,7 @@ Idiomas: [Inglês](docs/COOKBOOK.md) | [Português Brasileiro](docs/COOKBOOK.pt-
 
 ## Nota de Latência
 
-A camada de cache vive em `~/.cache/youtube-legend-cli/`. Em cache quente, o corpo é servido do disco em cerca de um milissegundo. Em cache frio, a latência é dominada pelo round-trip HTTP upstream somado ao throttling: `youtube-direct` fica em média 800 ms a 1,5 s de ponta a ponta em uma conexão residencial típica, `provider_a` fica em média 1,5 s a 3 s, e `provider_b` fica em média 2 s a 4 s por causa do round-trip de assinatura com AES-256-CBC mais PBKDF2. O throttle de uma requisição por segundo é por cadeia, não por provedor; então downloads consecutivos em cache frio pagam o custo do throttle a cada chamada.
+A camada de cache vive em `~/.cache/youtube-legend-cli/`. Em cache quente, o corpo é servido do disco em cerca de um milissegundo. Em cache frio, a latência é dominada pela inicialização do Chromium headless e navegação de página: `provider-noteey` fica em média 15 s a 30 s de ponta a ponta em um lançamento frio do browser, e 5 s a 10 s em chamadas subsequentes quando o perfil do browser está quente.
 
 ## Referência de Valores Padrão
 
@@ -29,8 +29,6 @@ A camada de cache vive em `~/.cache/youtube-legend-cli/`. Em cache quente, o cor
 | Dry run (só cache) | desligado | `--dry-run` |
 | Assumir sim nos prompts | desligado | `--yes` |
 | Provedor | `auto` | `--provider` |
-| Preferir trilha ASR | desligado | `--asr` |
-| Desabilitar cadeia de fallback | desligado | `--no-fallback` |
 
 
 ## How To baixar legendas de um vídeo
@@ -71,7 +69,7 @@ cat batch.log
 
 ## How To parsear o envelope JSON em Python
 
-PROBLEMA: Um pipeline precisa dos campos estruturados (`video_id`, `language`, `byte_size`, `body`) sem escrever regex.
+PROBLEMA: Um pipeline precisa dos campos estruturados (`video_id`, `language`, `byte_size`, `content`) sem escrever regex.
 
 SOLUÇÃO: Use `--json` para fazer a CLI emitir um envelope JSON de uma linha, depois parseie com `json.loads`.
 
@@ -86,9 +84,9 @@ result = subprocess.run(
     check=False,
 )
 envelope = json.loads(result.stdout)
-if envelope.get("error"):
-    raise SystemExit(f"erro do provedor: {envelope['error']}")
-print(envelope["body"])
+if "error" in envelope and envelope["error"]:
+    raise SystemExit(f"erro do provedor: {envelope['message']}")
+print(envelope["content"])
 ```
 
 VERIFICAÇÃO: O script imprime a transcrição no `stdout` e sai com código `0`. Se o upstream estiver indisponível, `envelope["error"]` é um objeto estruturado e o script sai com código diferente de zero.
@@ -98,14 +96,14 @@ VERIFICAÇÃO: O script imprime a transcrição no `stdout` e sai com código `0
 
 PROBLEMA: Execuções de CI precisam de um provedor determinístico para evitar flakes quando um upstream está degradado.
 
-SOLUÇÃO: Passe `--provider` para fixar um único provedor e `--no-fallback` para desabilitar a cadeia. A CLI sai com `69` se o provedor fixado falhar, em vez de tentar o próximo.
+SOLUÇÃO: Desde a v0.3.2, a CLI usa um único provedor (`provider-noteey`). Passe `--provider provider-noteey` explicitamente se quiser documentar a escolha em CI. A CLI sai com `69` se o provedor falhar.
 
 ```bash
-youtube-legend-cli --provider youtube-direct --no-fallback \
+youtube-legend-cli --provider provider-noteey \
   "https://youtu.be/dQw4w9WgXcQ" > legenda.txt
 ```
 
-VERIFICAÇÃO: O código de saída é `0` em sucesso, `69` em indisponibilidade do upstream, e nunca `0` vinda de um provedor diferente do que você fixou.
+VERIFICAÇÃO: O código de saída é `0` em sucesso, `69` em indisponibilidade do upstream.
 
 
 ## How To sobrescrever o TTL do cache
@@ -168,62 +166,15 @@ grep '"event":"http_response"' trace.log | tail
 
 PROBLEMA: Um job de CI precisa baixar legendas de uma lista fixa de vídeos e falhar o build se algum vídeo não tiver transcrição.
 
-SOLUÇÃO: Combine `--json`, `--no-fallback` para garantir determinismo e um loop de shell que verifica o código de saída por URL.
+SOLUÇÃO: Combine `--json` e `--provider provider-noteey` para garantir determinismo e um loop de shell que verifica o código de saída por URL.
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 while IFS= read -r url; do
-  if ! youtube-legend-cli --json --no-fallback --provider youtube-direct "$url" \
+  if ! youtube-legend-cli --json --provider provider-noteey "$url" \
        > "out/$(echo "$url" | sed 's|.*/||;s|?.*||').json" 2> "logs/$(date +%s).log"; then
-## How To forçar o provider YouTube direto
-
-PROBLEMA: Provedores third-party não indexam o vídeo, mas ele
-tem legendas públicas no YouTube.
-
-SOLUÇÃO: Passe `--provider youtube-direct` para fixar o
-provider nativo e pular a cadeia de fallback. A CLI então fala
-com o endpoint público do YouTube e emite um SRT limpo.
-
-```bash
-youtube-legend-cli --provider youtube-direct \
-  --language pt-BR \
-  "https://youtu.be/<id>" > legenda.srt
-```
-
-VERIFICAÇÃO: O SRT tem cues de timing canônicos do YouTube,
-sem watermark de provedor, e o campo `provider` do envelope
-mostra `youtube-direct`.
-
-```bash
-head -n 3 legenda.srt
-youtube-legend-cli --json "https://youtu.be/<id>" | jq -r .provider
-```
-
-
-## How To diagnosticar falha do player.js
-
-PROBLEMA: O vídeo é protegido por signature e a etapa de
-decipher falha. Você precisa de um diagnóstico estruturado antes
-de tentar de novo.
-
-SOLUÇÃO: Use o binário companheiro `youtube-direct-probe`. Ele
-inspeciona o `base.js` em cache, roda o decipher em uma signature
-sintética e imprime um relatório JSON.
-
-```bash
-youtube-direct-probe <video-id>
-```
-
-VERIFICAÇÃO: O probe imprime um objeto JSON por linha com
-`signature_status`, `player_js_version`, `cache_hit` e um campo
-opcional `decipher_error` em falha.
-
-```bash
-youtube-direct-probe <video-id> | jq -r '.signature_status'
-```
-
     echo "falha de CI em $url" >&2
     exit 1
   fi
@@ -231,3 +182,23 @@ done < urls.txt
 ```
 
 VERIFICAÇÃO: O job sai com código `0` quando cada URL produziu um envelope JSON, sai com o código da CLI (`64`/`65`/`66`/`69`/`70`) quando uma URL falhou, e o diretório `out/` contém um arquivo JSON por vídeo.
+
+
+## How To usar provider-noteey explicitamente
+
+PROBLEMA: Você quer documentar a escolha de provedor no seu script de pipeline.
+
+SOLUÇÃO: Passe `--provider provider-noteey` para fixar o provedor explicitamente. Desde a v0.3.2 este é o único provedor, então `auto` resolve para o mesmo caminho.
+
+```bash
+youtube-legend-cli --provider provider-noteey \
+  --lang pt \
+  "https://youtu.be/<id>" > legenda.txt
+```
+
+VERIFICAÇÃO: A saída é uma transcrição limpa e o campo `provider` do envelope JSON mostra `provider-noteey`.
+
+```bash
+youtube-legend-cli --json --provider provider-noteey "https://youtu.be/<id>" \
+  | jq -r .provider
+```

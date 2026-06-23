@@ -36,8 +36,8 @@ Sete testes de integração vivem sob `tests/integration/`:
 | `corpus` | Smoke test em um corpus de URLs reais do YouTube | Sim | Não — `--include-ignored` |
 | `rss` | Impõe o budget RSS do NFR-002 de 100 MiB | Não | Sim |
 | `offline_cache` | Round-trip de cache hit sem rede (NFR-005) | Não | Sim |
-| `provider_a_wiremock` | Provider A contra mocks `wiremock` | Não (mock) | Sim |
-| `provider_b_wiremock` | Provider B contra mocks `wiremock` | Não (mock) | Sim |
+| `provider_a_wiremock` | Provider A contra mocks `wiremock` (mock legado) | Não (mock) | Sim |
+| `provider_b_wiremock` | Provider B contra mocks `wiremock` (mock legado) | Não (mock) | Sim |
 | `signal_handler_stress` | `SIGINT` / `SIGTERM` sob stress | Não | Não — `--include-ignored` |
 | `cli_probing` | Flags da CLI e exit codes | Não | Sim |
 
@@ -121,7 +121,7 @@ mapeia para um portão de qualidade específico:
 | `test` | matriz stable + beta | `ubuntu-latest` | fmt, clippy, build, unit, doc, integration gated corpus, RSS gate, offline cache, wiremock, example smoke, binary size, --help/--version |
 | `cross-compile` | 6 alvos | `ubuntu-latest` | `cargo build --release --target <triple>` |
 | `publish-dry-run` | stable | `ubuntu-latest` | `cargo package --list` + `cargo publish --dry-run` |
-| `msrv` | rustc 1.96.0 | `ubuntu-latest` | `cargo build --locked` + `cargo test --lib --locked` |
+| `msrv` | rustc 1.88.0 | `ubuntu-latest` | `cargo build --locked` + `cargo test --lib --locked` |
 | `deny` | stable | `ubuntu-latest` | `cargo deny check` (licenças, bans, advisories) |
 | `audit` | stable | `ubuntu-latest` | `cargo audit` para vulnerabilidades conhecidas |
 | `public-api` | stable | `ubuntu-latest` | `cargo public-api` baseline + sigilo gate + diff de PR |
@@ -217,29 +217,19 @@ O alvo de benchmark requer `criterion = "0.5"` em
 mencionando `criterion`, rode `cargo build --benches` para
 forçar o download da dev dependency.
 
+## Testes de Provider (v0.3.2+)
+
+Desde a v0.3.2, a CLI usa exclusivamente `provider-noteey`. Os
+testes de integração `provider_a_wiremock` e `provider_b_wiremock`
+exercitam infraestrutura de mock legada. Os testes do
+`ProviderYouTubeDirect` da v0.3.0 foram removidos junto com o
+provider.
+
+Testes unitários do parser (`noteey_to_text`, normalização NFC,
+limpeza de marcadores de speaker) vivem em `src/parse/mod.rs`
+sob `#[cfg(test)]`.
+
 ## Veja Também
-## Testes do ProviderYouTubeDirect (v0.3.0)
-
-Categorias adicionadas em v0.3.0:
-
-- `unit_youtube`: testa `player_response`, `decipher`, `ncode`
-  e `caption_track` isoladamente contra fixtures.
-- `integration_youtube`: dirige o provider end-to-end contra
-  snapshots de HTML congelado.
-- `integration_srv3`: exercita o parser Srv3/Json3 com fixtures
-  em `tests/fixtures/timedtext/*.srv3`.
-
-### Como Rodar
-
-```bash
-cargo test --features youtube-direct
-```
-
-### Meta de Cobertura
-
-Expectativa: acima de 80 por cento de cobertura de linha nos
-módulos novos (`src/provider/youtube/`, `src/parse/srv3.rs`).
-
 
 - [README](../README.md) — instalação e execução.
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) — mapa de módulos e

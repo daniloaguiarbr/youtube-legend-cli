@@ -14,7 +14,7 @@ sidecar file the binary can persist carries a contract here.
 
 | Schema | Purpose | Companion Subcommand |
 |---|---|---|
-| `caption-track.schema.json` | Single track entry from `ytInitialPlayerResponse.captions.playerCaptionsTracklistRenderer.captionTracks[]` | `provider-youtube-direct` |
+| `caption-track.schema.json` | Single track entry from `ytInitialPlayerResponse.captions.playerCaptionsTracklistRenderer.captionTracks[]` | legacy `provider-youtube-direct` (removed in v0.3.2) |
 
 ### How schemas are versioned
 
@@ -34,7 +34,7 @@ arquivo sidecar que o binário pode persistir carrega um contrato aqui.
 
 | Schema | Propósito | Subcomando Acompanhante |
 |---|---|---|
-| `caption-track.schema.json` | Entrada única de track do array `ytInitialPlayerResponse.captions.playerCaptionsTracklistRenderer.captionTracks[]` | `provider-youtube-direct` |
+| `caption-track.schema.json` | Entrada única de track do array `ytInitialPlayerResponse.captions.playerCaptionsTracklistRenderer.captionTracks[]` | legacy `provider-youtube-direct` (removido na v0.3.2) |
 
 ### Como os schemas são versionados
 

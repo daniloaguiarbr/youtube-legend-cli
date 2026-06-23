@@ -1,4 +1,3 @@
-[English](AGENTS.md) | [Português Brasileiro](AGENTS.pt-BR.md)
 # AGENTS
 
 > A native-Unix subtitle fetcher that gives agents full control of the byte stream.
@@ -8,7 +7,7 @@ Languages: [English](docs/AGENTS.md) | [Português Brasileiro](docs/AGENTS.pt-BR
 ## Why
 
 - You are an agent, not a human. The CLI returns one URL in, one subtitle out, on plain `stdin` / `stdout`. No prompts, no TUI, no daemon to babysit.
-- You already speak JSON. Pass `--json` and the CLI hands you a typed envelope with `provider`, `video_id`, `language`, `format`, `byte_size`, `source_url`, and the body. No string parsing, no fragile regex over free text.
+- You already speak JSON. Pass `--json` and the CLI hands you a typed envelope with `provider`, `video_id`, `language`, `format`, `byte_size`, `source_url`, and `content` (the subtitle body). No string parsing, no fragile regex over free text.
 - You already speak exit codes. The CLI returns BSD `sysexits.h` numbers so POSIX pipelines, `set -e` scripts, and your error handlers can branch on category without custom mapping.
 
 ## Economy
@@ -55,7 +54,7 @@ A single clap-derived `Cli` struct captures the CLI flags. `commands::run` dispa
 
 ```bash
 youtube-legend-cli --json "https://youtu.be/dQw4w9WgXcQ" \
-  | jq -r '.body'
+  | jq -r '.content'
 ```
 
 Discover every flag with `youtube-legend-cli --help`. The full table lives in the project `README.md`.
@@ -117,11 +116,11 @@ transcripts from noteey.com.
   "provider": "provider-noteey",
   "video_id": "dQw4w9WgXcQ",
   "language": "en",
+  "language_detected": false,
   "format": "txt",
+  "content": "...",
   "byte_size": 1452,
-  "source_url": "https://noteey.com/...",
-  "body": "...",
-  "error": null
+  "source_url": "https://noteey.com/..."
 }
 ```
 

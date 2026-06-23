@@ -159,9 +159,8 @@ pub fn noteey_to_text(raw: &str) -> AppResult<String> {
         // it keeps the cue body. Lines that arrive with timestamp
         // AND text on the same line (`00:00 texto`) get the
         // timestamp stripped via `noteey_ts_re().replace`.
-        let matched_ts: Option<String> = noteey_ts_re()
-            .find(trimmed)
-            .map(|m| m.as_str().to_owned());
+        let matched_ts: Option<String> =
+            noteey_ts_re().find(trimmed).map(|m| m.as_str().to_owned());
         let is_standalone = matched_ts
             .as_deref()
             .map(|ts| ts.len() == trimmed.len())
@@ -173,6 +172,14 @@ pub fn noteey_to_text(raw: &str) -> AppResult<String> {
         }
         // Text line. Strip any leading timestamp prefix.
         let stripped = noteey_ts_re().replace(trimmed, "").trim().to_owned();
+        // GAP-AUD-2026-062: strip leading `>>` speaker change markers
+        // injected by YouTube auto-captions. These appear in interview
+        // and podcast transcripts to indicate a new speaker.
+        let stripped = stripped
+            .strip_prefix(">>")
+            .map(|s| s.trim())
+            .unwrap_or(&stripped)
+            .to_owned();
         // GAP-AUD-2026-038 marker-line handling: after stripping
         // the leading timestamp, the line may consist only of a
         // parenthetical `(Applause)` or bracketed `[Music]` marker
@@ -338,5 +345,27 @@ mod tests {
         let big = format!("00:00 {}\n", "a".repeat(51 * 1024 * 1024));
         let err = noteey_to_text(&big).unwrap_err();
         assert!(matches!(err, AppError::SubtitleTooLarge(_)));
+    }
+
+    // GAP-AUD-2026-062: speaker change markers `>>` must be stripped.
+    #[test]
+    fn noteey_clean_strips_speaker_change_markers() {
+        let raw = "00:00 hello\n00:03 >> world\n00:05 >> again\n";
+        let text = noteey_to_text(raw).unwrap();
+        assert_eq!(text, "hello\nworld\nagain");
+    }
+
+    #[test]
+    fn noteey_clean_strips_speaker_marker_without_timestamp() {
+        let raw = "hello\n>> world\n>> again\n";
+        let text = noteey_to_text(raw).unwrap();
+        assert_eq!(text, "hello\nworld\nagain");
+    }
+
+    #[test]
+    fn noteey_clean_drops_speaker_marker_only_line() {
+        let raw = "00:00 hello\n>>\n00:05 world\n";
+        let text = noteey_to_text(raw).unwrap();
+        assert_eq!(text, "hello\nworld");
     }
 }

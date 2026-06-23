@@ -1,311 +1,179 @@
 ---
 name: youtube-legend-cli
-description: Aciona quando o usuário pede para baixar legendas, captions, transcrições, SRT ou TXT do YouTube a partir de uma URL. Também aciona em menções a substituto do yt-dlp, daniloaguiarbr, youtube-legend-cli, alternativa ao downsub, save subs, raspagem headless de legendas ou download em lote a partir de uma lista de URLs do YouTube. A v0.3.2 usa exclusivamente o provider headless provider-noteey via Chromium controlado por chromiumoxide, com BrowserFetcher que baixa o Chromium automaticamente e patches de stealth anti-fingerprint. Use para invocar a CLI Rust youtube-legend-cli em recuperação de legendas não interativa, programável e envelopada em JSON.
+description: Aciona quando o usuário pede para baixar legendas, captions, transcrições, SRT ou TXT do YouTube a partir de uma URL (watch, shorts, embed, youtu.be). Também aciona em menções a substituto do yt-dlp, youtube-legend-cli, alternativa ao downsub, noteey, save subs, download em lote ou extração headless de legendas. Esta skill DEVE ser usada para invocar a CLI Rust youtube-legend-cli em recuperação não interativa e programável de legendas via pipeline headless-Chromium provider-noteey. Cobre todas as 18 flags da CLI com fórmulas prontas, campos do envelope JSON (content, language_detected, byte_size, video_id, duration_ms), exit codes BSD sysexits, saída NDJSON em lote, cache com TTL, retry e rate-limit, BrowserFetcher auto-download, override CHROME, variáveis de ambiente, config TOML e modo offline.
 ---
 
 
-## Instalação e Primeira Execução
-
-### OBRIGATÓRIO
-- Use `cargo install youtube-legend-cli` em qualquer deploy de produção
-- Toolchain Rust versão 1.88 ou mais recente no host para build a partir do source
-- Acesso de rede ao YouTube na TCP/443 para fetches headless
-- Acesso de rede para o BrowserFetcher baixar o Chromium na primeira execução
-- ESPERE download único de Chromium r1585606 para `~/.cache/youtube-legend-cli/browser/`
-- DEFINA `$CHROME` apontando para um binário Chromium existente para pular o download
-
-### PROIBIDO
-- NUNCA execute `cargo run --release` em loop apertado em scripts de produção
-- NUNCA compile o binário a partir do source em CI quando o pré-compilado está disponível
-- NUNCA use `cargo install --path .` para instalar fork local sem auditar o diff
-- NUNCA assuma que o primeiro fetch é instantâneo quando o Chromium ainda não foi baixado
-
-### Padrão Correto
-```bash
-cargo install youtube-legend-cli
-youtube-legend-cli "https://youtu.be/NvZ4VZ5hooY" > out.txt
-```
-
-### Padrão Correto — Chromium Pré-Instalado
-```bash
-CHROME=/usr/bin/chromium youtube-legend-cli "https://youtu.be/VIDEO" > out.txt
-```
+# youtube-legend-cli
 
 
-## Referência de Flags da CLI
+## Identidade e Arquitetura
+- youtube-legend-cli é uma CLI Rust não interativa que baixa legendas do YouTube
+- A CLI usa EXATAMENTE UM provider chamado `provider-noteey` (noteey.com via Chromium headless)
+- `--provider auto` resolve para `provider-noteey` sem fallback
+- noteey.com retorna UMA transcrição por página no idioma original do vídeo sem seleção de idioma
+- O parser remove timestamps, marcadores de anotação `[Music]` e marcadores de speaker `>>`
+- O parser normaliza toda saída para Unicode NFC
+- stdout carrega SOMENTE o texto da legenda ou o envelope `--json`
+- stderr carrega SOMENTE logs, barras de progresso e diagnósticos
+- SEMPRE descarte stderr antes de pipar stdout em `jaq`
+- `--format srt` está INDISPONÍVEL com provider-noteey e retorna exit 64
+- Instale com `cargo install youtube-legend-cli` — MSRV é Rust 1.88
 
-### OBRIGATÓRIO
+
+## Flags da CLI
 - PASSE `--json` para qualquer consumidor programático
-- `--lang` aceita `en`, `pt`, `es`, `fr`, `de`, `it` normalizados para BCP 47
+- `--lang` aceita ISO 639-1 ou BCP 47 normalizado para subtag primária (`pt-BR`, `pt_BR.UTF-8`, `EN-us` funcionam)
+- `--format` aceita `txt` (padrão, timestamps removidos) ou `srt` (INDISPONÍVEL, retorna exit 64)
 - `--provider` aceita SOMENTE `auto` (padrão) ou `provider-noteey`
-- `--format` aceita `txt` ou `srt`
-- `--batch` lê URLs do stdin uma por linha
-- `--cache-ttl` aceita horas inteiras positivas para sobrescrever o TTL, padrão 24
-- `--no-cache` força leitura fresca ignorando o cache local
-- `--config <PATH>` carrega arquivo TOML de configuração externa
+- `--timeout` aceita segundos inteiros positivos (padrão 30)
+- `--config <PATH>` carrega arquivo TOML de configuração
+- `--cache-ttl` aceita horas inteiras positivas (padrão 24)
+- `--no-cache` força leitura fresca ignorando o cache
 - `--no-progress` suprime barras de progresso no stderr
-- `--dry-run` valida a entrada sem disparar o fetch headless
+- `--dry-run` pula I/O de rede e serve somente do cache
 - `--yes` assume sim em prompts não interativos
+- `--batch` lê URLs do stdin uma por linha e emite NDJSON quando combinado com `--json`
 - `--user-agent` sobrescreve o cabeçalho User-Agent HTTP
-- `--timeout` aceita segundos inteiros positivos para limite HTTP, padrão 30
-- `--verbose` e `--quiet` controlam volume do log no stderr
+- `--verbose` ativa logging nível INFO no stderr (video_id_extracted, started, cache_hit, completed)
+- `--quiet` suprime todo output de log não erro no stderr
+- `--verbose` e `--quiet` são mutuamente exclusivos
 - `--log-level` aceita `error`, `warn`, `info`, `debug`, `trace`
 - `--log-format` aceita `text` ou `json`
 - `--color` aceita `auto`, `always`, `never`
-- Combine `--json` com `--lang` para envelopes de saída localizados
-
-### PROIBIDO
-- NUNCA passe `--provider youtube-direct`, `provider-a`, `provider-b` ou `provider-headless` — REMOVIDOS na v0.3.2
-- NUNCA passe `--asr`, `--no-fallback` ou `--headless` — REMOVIDOS na v0.3.2
+- NUNCA passe providers removidos (`youtube-direct`, `provider-a`, `provider-b`, `provider-headless`)
+- NUNCA passe flags removidas (`--asr`, `--no-fallback`, `--headless`)
+- NUNCA combine `--batch` com URL posicional — exit 64
+- NUNCA combine `--quiet` com `--verbose` — exit 64
+- NUNCA passe `--timeout 0` ou `--cache-ttl 0` — exit 64
 - NUNCA hardcode hostnames em scripts
-- NUNCA passe URL do YouTube como argumento posicional duas vezes
-- NUNCA combine `--no-cache` com invalidação explícita de cache
-
-### Padrão Correto
-```bash
-youtube-legend-cli --json --lang pt "https://youtu.be/abc" | jaq '.body'
-```
 
 
-## Provider Noteey Headless
-
-### OBRIGATÓRIO
-- O ÚNICO provider na v0.3.2 é `provider-noteey` em `src/provider/provider_noteey.rs`
-- `--provider auto` resolve para `provider-noteey` sem fallback
-- O provider controla Chromium headless via crate `chromiumoxide` 0.9.1
-- O BrowserFetcher baixa Chromium r1585606 para `~/.cache/youtube-legend-cli/browser/`
-- O download usa single-flight para evitar tempestades de fetch concorrentes
-- A env var `$CHROME` sobrescreve a busca do binário e pula o download
-- O módulo `src/provider/stealth.rs` aplica patches anti-fingerprint antes da navegação
-- Os patches de stealth cobrem `navigator.webdriver`, `plugins`, `languages`, vendor WebGL e `chrome.runtime`
-- ESPERE latência maior que provedores HTTP por inicializar um browser real
-
-### PROIBIDO
-- NUNCA referencie `youtube-direct`, `provider-a`, `provider-b` ou `provider-headless` — não existem mais
-- NUNCA invoque `youtube-direct-probe` — o binário foi removido
-- NUNCA persista o Chromium baixado fora do diretório XDG do cache
-- NUNCA desabilite os patches de stealth em produção
-
-### Padrão Correto
-```bash
-youtube-legend-cli --provider provider-noteey --lang pt \
-  "https://youtu.be/VIDEO" > legenda.srt
-```
+## Envelope JSON e NDJSON
+- VALIDE o campo `error` ANTES de confiar em qualquer outro campo
+- Campos do envelope de sucesso — `provider` (provider-noteey ou cache), `video_id`, `language` (locale solicitado), `language_detected` (SEMPRE false), `format`, `content` (texto limpo NFC), `byte_size` (tamanho exato em bytes do content), `duration_ms` (tempo wall-clock em ms), `source_url`
+- `language_detected` é SEMPRE false porque noteey.com NÃO tem seletor de idioma
+- `byte_size` reflete o tamanho EXATO em bytes do campo `content` após parsing e normalização NFC
+- Campos do envelope de erro — `error` (sempre true), `code` (exit code BSD sysexits), `message`
+- TODOS os erros emitem JSON estruturado no stdout quando `--json` está ativo, INCLUINDO erros de validação pre-fetch
+- `--batch --json` emite NDJSON (um objeto JSON por linha, terminado por newline) — NUNCA JSON concatenado
+- Cada objeto NDJSON é autocontido e parseável independentemente por `jaq`
+- LEIA `retry_after_seconds` quando presente em envelopes de erro
+- NUNCA leia `.body` — o campo se chama `.content`
+- NUNCA faça parse do stdout linha a linha como texto cru quando `--json` está ativo
+- NUNCA assuma que `content` é sempre não vazio
+- NUNCA assuma que saída batch é um array JSON — é NDJSON
 
 
-## Envelope JSON e Schema
-
-### OBRIGATÓRIO
-- VALIDE o campo `error` no stdout antes de confiar no body
-- O envelope expõe `provider`, `video_id`, `language`, `format`, `byte_size`, `source_url`, `body`, `error`
-- LEIA o campo `error` para detectar falha antes de consumir `body`
-- Faça piping do stdout via `jaq` ou parser JSON equivalente
-- LEIA o campo `retry_after_seconds` quando presente no envelope de erro
-
-### PROIBIDO
-- NUNCA faça parse do stdout linha-a-linha como texto de legenda cru quando `--json` está ativo
-- NUNCA pule a checagem do envelope
-- NUNCA assuma que o body é sempre uma string preenchida
-
-### Padrão Correto
-```bash
-out=$(youtube-legend-cli --json "$url")
-echo "$out" | jaq -e '.error == null' >/dev/null || echo "$out" | jaq '.error'
-```
-
-
-## Códigos de Saída e sysexits.h
-
-### OBRIGATÓRIO
-- `0` para sucesso
-- `2` rejeição do parser clap em flag malformada
-- `64` EX_USAGE em uso inválido (`InvalidUsage`)
-- `65` EX_DATAERR em URL ou entrada inválida (`InvalidUrl`, `InvalidInput`)
-- `66` EX_NOINPUT quando a URL não tem legendas disponíveis (`NoSubtitle`)
-- `69` EX_UNAVAILABLE em `ProviderUnavailable`, `RateLimited`, `BrowserNotFound`, `CaptchaChallenge`
-- `70` EX_SOFTWARE em falha interna (`Internal`, `Timeout`, `Http`, `Io`, `Crypto`, etc)
-- `78` EX_CONFIG em erro de configuração (`ConfigError`)
-- `130` SIGINT ou SIGTERM em interrupção do usuário
-
-### PROIBIDO
-- NUNCA dependa dos números exatos de exit sem o mapeamento por categoria
-- NUNCA mascare o exit code com fallback `|| true`
+## Códigos de Saída
+- `0` — sucesso
+- `2` — rejeição do parser clap (valor de flag inválido)
+- `64` EX_USAGE — combinações de flag inválidas, entrada inválida, `--format srt` com provider-noteey
+- `65` EX_DATAERR — URL do YouTube malformada ou não reconhecida
+- `66` EX_NOINPUT — vídeo não tem legenda correspondente
+- `69` EX_UNAVAILABLE — provider indisponível, rate-limited, Chromium ausente, ou captcha
+- `70` EX_SOFTWARE — falha interna, timeout, HTTP, I/O ou erro de parse
+- `78` EX_CONFIG — arquivo de configuração malformado ou ilegível
+- `130` — SIGINT ou SIGTERM interrupção do usuário
+- NUNCA mascare o exit code com `|| true`
 - NUNCA trate `69` como falha permanente — Chromium ausente e captcha são recuperáveis
 
-### Padrão Correto
-```bash
-youtube-legend-cli "$url" || case $? in
-  66) echo "sem legendas" ;;
-  69) echo "provider indisponivel, browser ausente ou captcha" ;;
-  70) echo "falha interna" ;;
-  78) echo "config invalida" ;;
-  *) echo "outra falha" ;;
-esac
-```
+
+## Provider e Chromium
+- O provider EXCLUSIVO é `provider-noteey` controlando noteey.com via Chromium headless
+- O provider navega para noteey.com, preenche o input de URL, clica "Get Subtitle" e faz poll do painel de transcrição por até 30 segundos
+- noteey.com retorna UMA transcrição no idioma ORIGINAL do vídeo — NÃO há seletor de idioma
+- Patches stealth anti-fingerprint são injetados via CDP antes da navegação
+- Ordem de resolução do Chromium — (1) variável `$CHROME`, (2) auto-download do BrowserFetcher da revisão `r1585606` em `~/.cache/youtube-legend-cli/browser/`, (3) caminhos de sistema como fallback
+- PREFIRA a revisão do BrowserFetcher sobre browser de sistema para evitar incompatibilidade de protocolo CDP
+- DEFINA `$CHROME` para fixar um binário compatível
+- Perfil do chrome em `~/.cache/youtube-legend-cli/chrome-profile/`
+- NUNCA espere que `--format srt` funcione
+- NUNCA espere que noteey retorne legendas em idioma específico
+- NUNCA espere que captcha se resolva por retry — exit 69
 
 
-## Comportamento de Cache
-
-### OBRIGATÓRIO
+## Cache e Retry
 - TTL padrão de 24 horas em disco em `~/.cache/youtube-legend-cli/`
-- O Chromium baixado vive em `~/.cache/youtube-legend-cli/browser/`
-- USE `--no-cache` para fetches frescos em pipelines de auditoria
-- USE `--cache-ttl` para sobrescrever o TTL em horas inteiras
-- Invalide uma entrada removendo o diretório dela
-- O download do browser usa single-flight para evitar tempestades de download
-
-### PROIBIDO
-- NUNCA hardcode paths em `/tmp` para armazenamento de cache
-- NUNCA delete o diretório inteiro de cache em scripts de produção
-- NUNCA redirecione o cache para fora do XDG
-
-### Padrão Correto
-```bash
-# Invalida uma entrada de legenda
-rm -rf ~/.cache/youtube-legend-cli/<autor>/subtitles/<video>/
-
-# Sobrescreve o TTL para um batch de longa duracao
-youtube-legend-cli --cache-ttl 168 "https://youtu.be/VIDEO"
-```
-
-
-## Retry e Rate Limiting
-
-### OBRIGATÓRIO
-- LEIA o campo `retry_after_seconds` do envelope JSON
-- PARE de tentar após a janela de delay fornecida pelo envelope
-- O fallback interno é 60 segundos com teto de 300 segundos
-- TRATE `CaptchaChallenge` como rate-limit suave e aguarde antes de retentar
-
-### PROIBIDO
-- NUNCA rode loops de retry client-side sem backoff
-- NUNCA martele o provider após resposta de rate-limit
-- NUNCA fixe `--timeout` abaixo de 5 segundos
-
-### Padrão Correto
-```bash
-# erros rate-limited carregam retry_after_seconds no envelope JSON
-sleep "$(echo "$out" | jaq '.retry_after_seconds // 60')"
-```
-
-
-## Contratos de Streaming
-
-### OBRIGATÓRIO
-- stdout carrega texto de legenda, SRT ou envelope JSON apenas
-- stderr carrega logs, progresso e diagnósticos
-- DESCARTE o stderr antes de pipar o stdout em `jaq`
-
-### PROIBIDO
-- NUNCA faça parse de logs do stderr como se fossem o body
-- NUNCA redirecione stderr para arquivo e depois releia como JSON
-
-### Padrão Correto
-```bash
-youtube-legend-cli --json "$url" 2>/dev/null | jaq '.body'
-```
-
-
-## Tratamento de Erros
-
-### OBRIGATÓRIO
-- RAMIFIQUE na categoria `AppError` do envelope
-- MAPEIE categorias para política de retry na camada de orquestração
-- O enum `AppError` é `#[non_exhaustive]`; trate cada variante como categoria
-- USE o helper `reason()` para extrair `NoSubtitleReason` quando o erro for `NoSubtitle`
-- TRATE `BrowserNotFound` definindo `$CHROME` ou permitindo o download do BrowserFetcher
-
-### PROIBIDO
-- NUNCA entre em panic na lógica de pipeline em exit não-zero
-- NUNCA transforme o erro em string para casar por substring
-
-### Padrão Correto
-```rust
-match err {
-    AppError::NoSubtitle(reason) => log::warn!("sem legenda: {reason}"),
-    AppError::BrowserNotFound(msg) => log::error!("Chromium ausente: {msg}; defina $CHROME ou habilite o BrowserFetcher"),
-    AppError::CaptchaChallenge { .. } => log::warn!("captcha detectado; aguarde antes de retentar"),
-    AppError::RateLimited { retry_after_secs } => {
-        tokio::time::sleep(Duration::from_secs(retry_after_secs.unwrap_or(60))).await;
-    }
-    _ => return Err(err),
-}
-```
+- Sobrescreva a raiz do cache com `$YT_LEGEND_CACHE_DIR`
+- USE `--no-cache` para fetches frescos
+- USE `--cache-ttl` para TTL customizado em horas
+- Invalide uma entrada removendo seu diretório
+- LEIA `retry_after_seconds` de envelopes de erro em HTTP 429
+- Fallback interno 60s, teto 300s
+- NUNCA delete o diretório inteiro de cache em produção
+- NUNCA rode loops de retry sem backoff
+- NUNCA defina `--timeout` abaixo de 5 segundos
 
 
 ## Variáveis de Ambiente
-
-### OBRIGATÓRIO
-- `$CHROME` aponta para um binário Chromium existente e pula o download do BrowserFetcher
-- `$YT_LEGEND_NO_NETWORK` presente, com qualquer valor, curto-circuita o provider e retorna `ProviderUnavailable`
-- `YT_LOG_LEVEL` vence `--log-level`
-- `YT_LOG_FORMAT` vence `--log-format`
-- `YT_LEGEND_CACHE_DIR` sobrescreve o diretório de cache XDG padrão
-- USE a família `YT_*` para qualquer override de configuração
-
-### PROIBIDO
-- NUNCA defina `RUST_LOG` diretamente
-- NUNCA passe flags de log e env vars que conflitem
-- NUNCA confie em `RUST_LOG` para vencer as env vars `YT_*`
-
-### Padrão Correto
-```bash
-YT_LOG_LEVEL=debug YT_LOG_FORMAT=json youtube-legend-cli "$url"
-```
-
-### Padrão Correto — Modo Offline
-```bash
-YT_LEGEND_NO_NETWORK=1 youtube-legend-cli "$url"
-# Retorna ProviderUnavailable com exit 69
-```
+- `CHROME` — fixa o executável Chromium, pula BrowserFetcher
+- `YT_LEGEND_NO_NETWORK` — desabilita rede, retorna exit 69
+- `YT_LOG_LEVEL` — vence `--log-level`
+- `YT_LOG_FORMAT` — vence `--log-format`
+- `YT_LEGEND_CACHE_DIR` — sobrescreve diretório de cache XDG
+- `NO_COLOR` e `CLICOLOR_FORCE` são honrados quando `--color` é `auto`
+- USE a família `YT_*` para qualquer override
+- NUNCA defina `RUST_LOG` quando `YT_*` se aplica
 
 
-## Download em Lote
-
-### OBRIGATÓRIO
-- USE `--batch` para ler URLs do stdin uma por linha
-- COMBINE `--batch` com `--json` para envelopes processáveis por linha
-- ENCAPSULE o lote com `timeout` em segundos para evitar travamento
-- ESPERE reuso da instância de browser entre URLs do mesmo lote
-
-### PROIBIDO
-- NUNCA dispare um processo separado por URL quando `--batch` resolve
-- NUNCA pipe stderr para o parser JSON no modo lote
-
-### Padrão Correto
-```bash
-printf '%s\n' \
-  "https://youtu.be/aaa" \
-  "https://youtu.be/bbb" \
-  | youtube-legend-cli --batch --json --lang pt 2>/dev/null \
-  | jaq -r 'select(.error == null) | .body'
-```
+## Arquivo de Config (TOML)
+- `--config <PATH>` carrega tabela TOML com chaves espelhando flags longas sem `--`
+- Precedência — flag CLI > valor do config > default embutido
+- Chaves suportadas — `url`, `lang`, `format`, `timeout`, `cache_ttl`, `user_agent`, `provider`
+- Chaves booleanas — `verbose`, `quiet`, `json`, `batch`, `no_cache`, `dry_run`, `no_progress`, `yes`
+- Opcionais — `log_level`, `log_format`, `color`
+- Um config mínimo contém `lang = "pt"`, `format = "txt"`, `cache_ttl = 24`
+- NUNCA adicione chave desconhecida — exit 78
+- NUNCA escreva TOML malformado — exit 78
 
 
-## Alvos de Cross-Compile
-
-### OBRIGATÓRIO
-- `x86_64-unknown-linux-gnu` é o alvo primário de desenvolvimento
-- `x86_64-unknown-linux-musl` e `aarch64-unknown-linux-musl` suportam contêineres estáticos
-- `x86_64-pc-windows-msvc` cobre Windows nativo
-- `x86_64-apple-darwin` e `aarch64-apple-darwin` cobrem macOS
-- VERIFIQUE que o Chromium correspondente ao alvo está disponível em runtime
-
-### PROIBIDO
-- NUNCA publique um release sem os alvos passando no CI
-- NUNCA confie em `cargo build` local como substituto do gate de cross-compile
-
-### Padrão Correto
-```bash
-cargo install cross --locked
-cross build --target x86_64-unknown-linux-musl --release
-```
+## Tratamento de Erros
+- RAMIFIQUE pelo exit code para determinar a categoria de erro
+- `BrowserNotFound` (exit 69) — instale um browser ou defina `$CHROME`
+- `CaptchaChallenge` (exit 69) — requer interação humana, NÃO resolve por retry
+- `NoSubtitle` (exit 66) — não existe transcrição para o idioma solicitado
+- `RateLimited` (exit 69) — leia `retry_after_seconds` e aguarde
+- TODOS os erros emitem JSON estruturado quando `--json` está ativo
+- NUNCA entre em panic em exit não zero
+- NUNCA transforme erros em string para casar por substring
 
 
-## Veja Também
-- [CHANGELOG.md](../../CHANGELOG.md) — histórico completo de releases
-- [docs/AGENTS.pt-BR.md](../../docs/AGENTS.pt-BR.md) — guia para agentes com tabela de variantes de erro
-- [docs/COOKBOOK.pt-BR.md](../../docs/COOKBOOK.pt-BR.md) — receitas práticas para shell, CI e Python
-- [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) — diagrama do pipeline e mapa de módulos
-- [docs/CROSS_PLATFORM.pt-BR.md](../../docs/CROSS_PLATFORM.pt-BR.md) — receitas de cross-compile e paths XDG
-- [gaps.md](../../gaps.md) — registro vivo de problemas conhecidos
+## Fórmulas Prontas
+- FÓRMULAS POR FLAG (todas as 18 flags)
+- BAIXAR vídeo único — `youtube-legend-cli "https://youtu.be/VIDEO" > legenda.txt`
+- EXTRAIR conteúdo via JSON — `youtube-legend-cli --json "https://youtu.be/VIDEO" 2>/dev/null | jaq -r '.content'`
+- SELECIONAR idioma — `youtube-legend-cli --lang pt-BR "https://youtu.be/VIDEO" > legenda.txt`
+- SELECIONAR idioma com variante locale — `youtube-legend-cli --lang pt_BR.UTF-8 "https://youtu.be/VIDEO"`
+- FORMATO txt explícito — `youtube-legend-cli --format txt "https://youtu.be/VIDEO" > limpo.txt`
+- DEFINIR timeout customizado — `youtube-legend-cli --timeout 60 "https://youtu.be/VIDEO"`
+- CARREGAR arquivo de config — `youtube-legend-cli --config ./yt-legend.toml "https://youtu.be/VIDEO"`
+- SOBRESCREVER TTL do cache — `youtube-legend-cli --cache-ttl 168 "https://youtu.be/VIDEO"`
+- FORÇAR leitura fresca — `youtube-legend-cli --no-cache "https://youtu.be/VIDEO" > fresco.txt`
+- SUPRIMIR barras de progresso — `youtube-legend-cli --no-progress "https://youtu.be/VIDEO" > legenda.txt 2>/dev/null`
+- DRY RUN somente cache — `youtube-legend-cli --dry-run "https://youtu.be/VIDEO"`
+- BATCH não interativo — `youtube-legend-cli --yes --batch < urls.txt > saida.txt`
+- BATCH com NDJSON — `cat urls.txt | youtube-legend-cli --batch --json 2>/dev/null | jaq -r 'select(.error == null) | .content'`
+- USER-AGENT customizado — `youtube-legend-cli --user-agent "MeuBot/1.0" "https://youtu.be/VIDEO"`
+- DEBUG verboso — `youtube-legend-cli --verbose --log-level debug "https://youtu.be/VIDEO" > sub.txt 2> trace.log`
+- MODO silencioso — `youtube-legend-cli --quiet "https://youtu.be/VIDEO" > legenda.txt`
+- FORMATO de log JSON — `YT_LOG_FORMAT=json youtube-legend-cli --log-format json --json "https://youtu.be/VIDEO" 2> logs.jsonl`
+- SEM COR em CI — `youtube-legend-cli --color never --json "https://youtu.be/VIDEO"`
+- FIXAR provider — `youtube-legend-cli --provider provider-noteey "https://youtu.be/VIDEO"`
+- EXTRAÇÃO DE CAMPOS DO ENVELOPE
+- EXTRAIR video_id — `youtube-legend-cli --json "URL" 2>/dev/null | jaq -r '.video_id'`
+- VERIFICAR language_detected — `youtube-legend-cli --json "URL" 2>/dev/null | jaq '.language_detected'`
+- LER byte_size — `youtube-legend-cli --json "URL" 2>/dev/null | jaq '.byte_size'`
+- LER duration_ms — `youtube-legend-cli --json "URL" 2>/dev/null | jaq '.duration_ms'`
+- LER source_url — `youtube-legend-cli --json "URL" 2>/dev/null | jaq -r '.source_url'`
+- LER provider — `youtube-legend-cli --json "URL" 2>/dev/null | jaq -r '.provider'`
+- EXTRAIR código de erro — `youtube-legend-cli --json "URL_INVALIDA" 2>/dev/null | jaq '.code'`
+- EXTRAIR mensagem de erro — `youtube-legend-cli --json "URL_INVALIDA" 2>/dev/null | jaq -r '.message'`
+- PADRÕES COMBINADOS
+- PARSEAR envelope com segurança — `out=$(youtube-legend-cli --json "$url" 2>/dev/null) && echo "$out" | jaq -e '.error == null' >/dev/null && echo "$out" | jaq -r '.content' || echo "$out" | jaq '{code: .code, message: .message}'`
+- ROTEAR por exit code — `youtube-legend-cli "$url" || case $? in 66) echo "sem legendas";; 69) echo "provider indisponivel";; *) echo "falha";; esac`
+- CI fresco sem progresso JSON — `youtube-legend-cli --json --no-cache --no-progress --provider provider-noteey "$url" > out.json 2> trace.log`
+- BATCH silencioso NDJSON — `cat urls.txt | youtube-legend-cli --batch --json --quiet --no-progress 2>/dev/null | jaq -c 'select(.error == null) | {id: .video_id, bytes: .byte_size}'`
+- MODO offline — `YT_LEGEND_NO_NETWORK=1 youtube-legend-cli "$url"` (retorna exit 69)
+- FIXAR Chromium — `CHROME=/usr/bin/chromium youtube-legend-cli "$url"`
+- PIPELINE de auditoria fresca — `youtube-legend-cli --no-cache --json "$url" 2>/dev/null | jaq -r '.content' > auditoria-fresca.txt`

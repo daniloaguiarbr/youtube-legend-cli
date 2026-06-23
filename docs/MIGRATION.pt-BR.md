@@ -1,8 +1,61 @@
+[English](MIGRATION.md) | [Português Brasileiro](MIGRATION.pt-BR.md)
 # Guia de Migração — youtube-legend-cli
 
-> Migre de v0.2.x para v0.3.x sem surpresas.
+> Notas de atualização para cada release major.
 
-## O Que Muda
+## v0.3.3 — Correções de Qualidade e Precisão
+
+v0.3.3 corrige 10 bugs encontrados durante auditoria end-to-end.
+Sem breaking changes; todas as correções são aditivas ou corretivas.
+
+| Correção | Impacto |
+|---|---|
+| Envelope JSON de erro para falhas pre-fetch (GAP-060) | `--json` agora emite erros estruturados para falhas de validação |
+| Campo `language_detected` (GAP-061) | Novo campo booleano no envelope JSON; `false` quando provider não seleciona idioma |
+| Limpeza de marcadores de speaker `>>` (GAP-062) | Parser remove prefixos `>>` das linhas de transcrição |
+| Precisão de `byte_size` (GAP-065) | Agora reflete o tamanho do conteúdo limpo NFC, não do HTML cru |
+| Flag `--verbose` funcional (GAP-066) | Era uma flag morta; agora ativa logging nível INFO |
+| Ruído de cleanup do Chromium (GAP-067) | Sem mais `kill signal failed` no stderr |
+| Limitação de SRT no help (GAP-068) | `--help` documenta que SRT não está disponível com provider-noteey |
+| Saída NDJSON em batch (GAP-069) | `--batch --json` agora emite objetos JSON terminados por newline |
+
+### Passos de Migração
+
+1. Se você parseia saída `--json`, adicione tratamento para o novo
+   campo booleano `language_detected`.
+2. Se você depende de `byte_size`, note que agora corresponde
+   exatamente ao tamanho do campo `content` (antes podia diferir).
+3. Nenhuma outra mudança necessária.
+
+## v0.3.2 — Consolidação em Provider Único
+
+v0.3.2 remove todos os providers exceto `provider-noteey`. Esta é
+uma breaking change para scripts que pinam um provider específico.
+
+| Removido | Substituto |
+|---|---|
+| `--provider youtube-direct` | `--provider auto` (resolve para `provider-noteey`) |
+| `--provider provider-a` | `--provider auto` |
+| `--provider provider-b` | `--provider auto` |
+| `--provider provider-headless` | `--provider auto` |
+| Flag `--asr` | removida, sem substituto |
+| Flag `--no-fallback` | removida, sem substituto |
+| Flag `--headless` | removida, sem substituto |
+| Binário `youtube-direct-probe` | removido, sem substituto |
+
+### Passos de Migração
+
+1. Remova qualquer `--provider provider-a`, `--provider provider-b`,
+   `--provider youtube-direct` ou `--provider provider-headless`
+   dos seus scripts. Use `--provider auto` ou omita a flag.
+2. Remova as flags `--asr`, `--no-fallback` e `--headless`.
+3. Garanta que Chrome/Chromium está disponível, ou deixe o
+   `BrowserFetcher` baixar automaticamente. Defina `$CHROME`
+   para sobrescrever o caminho do binário.
+4. O campo `body` do envelope JSON foi renomeado para `content`.
+   Atualize filtros `jq`: `.body` → `.content`.
+
+## v0.3.0 — Provider YouTube-Direct
 
 A release v0.3.0 adiciona um provider YouTube-direct de primeira
 classe e três novas flags. O comportamento padrão para usuários
@@ -138,32 +191,6 @@ na hora da instalação. A CLI não auto-atualiza; o binário no
 disco é o binário que roda.
 
 ## Veja Também
-## O Que Chega em v0.3.0
-
-### O Que Muda
-
-- Novo provider primário: `ProviderYouTubeDirect`.
-- Cadeia reordenada: `Auto=YT-Direct -> A -> B -> [Headless]`.
-- Parser Srv3/Json3 nativo em Rust (`src/parse/srv3.rs`).
-- Decipher de signature via `base.js` (cache em
-  `~/.cache/youtube-legend-cli/player/`).
-- Novas variantes em `AppError` (aditivas, não breaking).
-
-### Migração Passo a Passo
-
-1. Atualize a CLI: `cargo install youtube-legend-cli --version 0.3.0`.
-2. Limpe o cache antigo: `rm -rf ~/.cache/youtube-legend-cli/`.
-3. Rode um comando de teste: `youtube-legend-cli https://youtu.be/<id>`.
-4. Se aparecer SRT sem watermark de provedor: sucesso.
-5. Se aparecer exit 70: rode `youtube-direct-probe <id>` para diagnóstico.
-
-### Notas de Compatibilidade
-
-- Clientes da biblioteca `AppError` continuam funcionando (apenas adições).
-- Exit codes permanecem os mesmos (BSD `sysexits.h`).
-- A seleção `--provider a|b|headless` segue disponível (legado de v0.2.9).
-
-
 - [CHANGELOG.md](../CHANGELOG.md) — histórico completo de releases.
 - [docs/ARCHITECTURE.md](ARCHITECTURE.md) — pipeline de providers e
   semântica da cadeia.

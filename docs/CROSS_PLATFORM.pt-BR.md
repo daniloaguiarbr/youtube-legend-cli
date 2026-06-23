@@ -118,17 +118,18 @@ sem shell.
 ```dockerfile
 FROM rust:1.88-alpine AS builder
 RUN apk add --no-cache musl-dev
-RUN cargo install youtube-legend-cli --locked --features headless --root /out
+RUN cargo install youtube-legend-cli --locked --root /out
 
 FROM alpine:3.20
 RUN apk add --no-cache chromium
 COPY --from=builder /out/bin/youtube-legend-cli /usr/local/bin/
+ENV CHROME=/usr/bin/chromium-browser
 ENTRYPOINT ["youtube-legend-cli"]
 ```
 
-A feature `headless` é opt-in. Quando habilitada, o binário
-espera um binário `chromium` ou `chrome` acessível via `$CHROME`
-ou nos caminhos conhecidos do sistema.
+A CLI requer Chrome/Chromium em runtime para o provider
+`provider-noteey`. Defina `$CHROME` apontando para o binário do
+browser, ou deixe o `BrowserFetcher` baixar automaticamente.
 
 ## Suporte a Shells
 

@@ -7,7 +7,7 @@ Idiomas: [Inglês](docs/AGENTS.md) | [Português Brasileiro](docs/AGENTS.pt-BR.m
 ## Por que
 
 - Você é um agente, não um humano. A CLI entrega uma URL na entrada, uma legenda na saída, em `stdin` e `stdout` puros. Sem prompts, sem TUI, sem daemon para monitorar.
-- Você já fala JSON. Passe `--json` e a CLI entrega um envelope tipado com `provider`, `video_id`, `language`, `format`, `byte_size`, `source_url` e o corpo. Sem parsear strings, sem regex frágil sobre texto livre.
+- Você já fala JSON. Passe `--json` e a CLI entrega um envelope tipado com `provider`, `video_id`, `language`, `format`, `byte_size`, `source_url` e `content` (o corpo da legenda). Sem parsear strings, sem regex frágil sobre texto livre.
 - Você já fala códigos de saída. A CLI retorna números BSD `sysexits.h` para que pipelines POSIX, scripts com `set -e` e seus manipuladores de erro ramifiquem por categoria sem mapeamento customizado.
 
 ## Economia
@@ -54,7 +54,7 @@ Uma única struct `Cli` derivada de `clap` captura as flags da CLI. `commands::r
 
 ```bash
 youtube-legend-cli --json "https://youtu.be/dQw4w9WgXcQ" \
-  | jq -r '.body'
+  | jq -r '.content'
 ```
 
 Descubra todas as flags com `youtube-legend-cli --help`. A tabela completa vive no `README.md` do projeto.
@@ -117,11 +117,11 @@ transcripts do noteey.com.
   "provider": "provider-noteey",
   "video_id": "dQw4w9WgXcQ",
   "language": "en",
+  "language_detected": false,
   "format": "txt",
+  "content": "...",
   "byte_size": 1452,
-  "source_url": "https://noteey.com/...",
-  "body": "...",
-  "error": null
+  "source_url": "https://noteey.com/..."
 }
 ```
 

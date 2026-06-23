@@ -9,7 +9,6 @@
 //! live path is exercised in `src/provider/provider_noteey.rs` via a
 //! `#[ignore]`'d test that requires network access.
 
-
 use serial_test::serial;
 use std::env;
 use youtube_legend_cli::error::AppError;

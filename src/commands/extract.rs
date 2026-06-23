@@ -30,8 +30,21 @@ use tracing::instrument;
 pub async fn run(cli: &Cli, chain: &ProviderChain) -> AppResult<ExitCode> {
     let started = Instant::now();
 
-    let url = extract_url_from_input(cli).await?;
-    let video_id = parse_video_id_from_url(cli, &url)?;
+    // GAP-AUD-2026-060: emit JSON error envelope for input errors.
+    let url = match extract_url_from_input(cli).await {
+        Ok(u) => u,
+        Err(e) => {
+            output_error(cli, &e).await.ok();
+            return Ok(ExitCode::from(e.exit_code()));
+        }
+    };
+    let video_id = match parse_video_id_from_url(cli, &url) {
+        Ok(id) => id,
+        Err(e) => {
+            output_error(cli, &e).await.ok();
+            return Ok(ExitCode::from(e.exit_code()));
+        }
+    };
     tracing::Span::current().record("video_id", tracing::field::display(&video_id));
 
     let lang = language_to_str(cli.lang);
@@ -50,14 +63,19 @@ pub async fn run(cli: &Cli, chain: &ProviderChain) -> AppResult<ExitCode> {
             Ok(Some((bytes, format_hint))) => {
                 tracing::info!(target: "events", event = "cache_hit", video_id = %video_id);
                 let duration_ms = started.elapsed().as_millis() as u64;
-                let bytes_len = bytes.len() as u64;
                 // GAP-AUD-2026-051: cache hits now honour the stored
                 // `format_hint` instead of hard-coding `Srt`. Without
                 // this fix, noteey-style bodies cached on disk were
                 // re-parsed as SRT and leaked `MM:SS` timestamps into
                 // the output.
-                let converted = convert_format(&bytes, format, format_hint)?;
-                output_success(cli, "cache", &video_id, &converted, "cache", bytes_len, duration_ms).await?;
+                let converted = match convert_format(&bytes, format, format_hint) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        output_error(cli, &e).await.ok();
+                        return Ok(ExitCode::from(e.exit_code()));
+                    }
+                };
+                output_success(cli, "cache", &video_id, &converted, "cache", duration_ms).await?;
                 tracing::info!(target: "events", event = "completed", video_id = %video_id, source = "cache");
                 return Ok(ExitCode::SUCCESS);
             }
@@ -107,9 +125,7 @@ pub async fn run(cli: &Cli, chain: &ProviderChain) -> AppResult<ExitCode> {
             // GAP-AUD-2026-051: persist the format_hint sidecar so the
             // next cache hit can route the body through the right
             // parser (srt vs noteey).
-            if let Err(e) =
-                cache::write_cache_with_hint(&path, &content, info.format_hint).await
-            {
+            if let Err(e) = cache::write_cache_with_hint(&path, &content, info.format_hint).await {
                 tracing::warn!(target: "events", event = "cache_write_error", error = %e);
             }
         }
@@ -123,14 +139,15 @@ pub async fn run(cli: &Cli, chain: &ProviderChain) -> AppResult<ExitCode> {
         }
     };
 
-    let bytes = content.len() as u64;
     let duration_ms = started.elapsed().as_millis() as u64;
     let source = info.source_url.clone();
     let provider = info.provider;
 
-    output_success(cli, provider, &video_id, &converted, &source, bytes, duration_ms).await?;
+    // GAP-AUD-2026-065: byte_size is now computed inside
+    // output_success from the final NFC content.
+    output_success(cli, provider, &video_id, &converted, &source, duration_ms).await?;
 
-    tracing::info!(target: "events", event = "completed", video_id = %video_id, provider, duration_ms, bytes);
+    tracing::info!(target: "events", event = "completed", video_id = %video_id, provider, duration_ms);
 
     Ok(ExitCode::SUCCESS)
 }

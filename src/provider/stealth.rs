@@ -324,8 +324,7 @@ pub fn prepare_user_data_dir() -> Option<std::path::PathBuf> {
             } else {
                 // Plain file with stale mtime (>1h) is also suspect.
                 if let Ok(modified) = meta.modified() {
-                    if modified.elapsed().unwrap_or_default()
-                        > std::time::Duration::from_secs(3600)
+                    if modified.elapsed().unwrap_or_default() > std::time::Duration::from_secs(3600)
                     {
                         let _ = std::fs::remove_file(&path);
                     }
